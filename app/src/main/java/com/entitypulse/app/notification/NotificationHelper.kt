@@ -157,7 +157,7 @@ class NotificationHelper(private val context: Context) {
 
     private suspend fun loadBitmap(context: Context, url: String): Bitmap? = withContext(Dispatchers.IO) {
         try {
-            val loader = ImageLoader(context)
+            val loader = ImageLoader.Builder(context).build()
             val request = ImageRequest.Builder(context)
                 .data(url)
                 .allowHardware(false)

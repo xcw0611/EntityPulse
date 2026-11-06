@@ -29,26 +29,7 @@ class BackupManager(
             root.put("exportTime", System.currentTimeMillis())
 
             val entitiesArray = JSONArray()
-            val entities = database.openHelper.readableDatabase.let {
-                // 读取全部 entity
-                val list = mutableListOf<EntityRecord>()
-                val cursor = it.query("SELECT * FROM entities")
-                while (cursor.moveToNext()) {
-                    list.add(
-                        EntityRecord(
-                            id = cursor.getLong(cursor.getColumnIndexOrThrow("id")),
-                            name = cursor.getString(cursor.getColumnIndexOrThrow("name")),
-                            avatarUrl = cursor.getString(cursor.getColumnIndexOrThrow("avatarUrl")),
-                            bio = cursor.getString(cursor.getColumnIndexOrThrow("bio")),
-                            category = cursor.getString(cursor.getColumnIndexOrThrow("category")),
-                            isVip = cursor.getInt(cursor.getColumnIndexOrThrow("isVip")) == 1,
-                            isNotifyEnabled = cursor.getInt(cursor.getColumnIndexOrThrow("isNotifyEnabled")) == 1
-                        )
-                    )
-                }
-                cursor.close()
-                list
-            }
+            val entities = entityDao.getAll()
 
             for (entity in entities) {
                 val entityObj = JSONObject().apply {

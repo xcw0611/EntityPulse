@@ -8,16 +8,14 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.activity.viewModels
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.entitypulse.app.notification.NotificationHelper
 import com.entitypulse.app.ui.MainViewModel
 import com.entitypulse.app.ui.screens.MainScreen
 import com.entitypulse.app.ui.theme.EntityPulseTheme
 
 class MainActivity : ComponentActivity() {
-
-    private val viewModel: MainViewModel by viewModels()
 
     private val requestNotificationPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { _ ->
@@ -35,6 +33,7 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             EntityPulseTheme {
+                val viewModel: MainViewModel = viewModel()
                 MainScreen(
                     viewModel = viewModel,
                     initialPostId = initialPostId,

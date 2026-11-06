@@ -40,15 +40,17 @@ interface EntityDao {
     @Query("UPDATE entities SET isNotifyEnabled = :enabled, updatedAt = :updatedAt WHERE id = :id")
     suspend fun updateNotifyStatus(id: Long, enabled: Boolean, updatedAt: Long = System.currentTimeMillis())
 
+    @Query("SELECT * FROM entities")
+    suspend fun getAll(): List<EntityRecord>
+
     @Query("""
         SELECT e.*, 
             COALESCE(SUM(CASE WHEN f.isRead = 0 THEN 1 ELSE 0 END), 0) AS unreadCount,
             (SELECT f2.title FROM feed_items f2 WHERE f2.entityId = e.id ORDER BY f2.publishedAt DESC LIMIT 1) AS latestFeedTitle,
             (SELECT f3.publishedAt FROM feed_items f3 WHERE f3.entityId = e.id ORDER BY f3.publishedAt DESC LIMIT 1) AS latestFeedPublishedAt,
-            COALESCE(GROUP_CONCAT(DISTINCT sc.platformType), '') AS channelTypes
+            '' AS channelTypes
         FROM entities e
         LEFT JOIN feed_items f ON e.id = f.entityId
-        LEFT JOIN source_channels sc ON e.id = sc.entityId
         GROUP BY e.id
         ORDER BY e.isVip DESC, e.updatedAt DESC
     """)
