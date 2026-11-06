@@ -1,0 +1,11 @@
+<resources>
+    <string name="app_name">EntityPulse</string>
+    <string name="tab_hub">看板</string>
+    <string name="tab_feed">动态流</string>
+    <string name="tab_settings">设置</string>
+    
+    <string name="notification_channel_vip">VIP 核心更新</string>
+    <string name="notification_channel_vip_desc">已开启 VIP 强提醒主体的最新动态，包含浮动通知与震动提示</string>
+    <string name="notification_channel_normal">日常动态提醒</string>
+    <string name="notification_channel_normal_desc">已关注主体的日常社交动态与更新</string>
+</resources>
