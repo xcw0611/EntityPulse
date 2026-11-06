@@ -112,6 +112,46 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun addEntityWithChannels(
+        name: String,
+        bio: String?,
+        avatarUrl: String?,
+        isVip: Boolean,
+        category: String,
+        channels: List<PredefinedChannel>
+    ) {
+        viewModelScope.launch {
+            if (name.isBlank()) return@launch
+            val entityId = repository.createEntity(
+                name = name.trim(),
+                bio = bio?.trim()?.ifBlank { null },
+                avatarUrl = avatarUrl?.trim()?.ifBlank { null },
+                isVip = isVip,
+                category = category.trim().ifBlank { "默认" }
+            )
+            for (ch in channels) {
+                repository.addChannel(
+                    entityId = entityId,
+                    platformType = ch.platformType,
+                    identifier = ch.identifier,
+                    resolvedFeedUrl = ch.feedPathOrUrl,
+                    title = ch.title
+                )
+            }
+            _userMessage.emit("已创建主体「$name」并自动绑定 ${channels.size} 个社交账号！正在拉取动态...")
+            refreshAll()
+        }
+    }
+
+    fun updateProxySettings(enabled: Boolean, host: String, port: Int) {
+        nodeManager.isProxyEnabled = enabled
+        nodeManager.proxyHost = host
+        nodeManager.proxyPort = port
+        viewModelScope.launch {
+            _userMessage.emit(if (enabled) "已开启应用代理: $host:$port" else "已停用应用代理")
+        }
+    }
+
     fun deleteEntity(entity: EntityRecord) {
         viewModelScope.launch {
             repository.deleteEntity(entity)

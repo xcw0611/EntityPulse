@@ -48,6 +48,10 @@ fun AddChannelDialog(
         testResult = null
     }
 
+    val recommendedChannels = remember(entityName) {
+        com.entitypulse.app.data.model.EntityCatalog.findOrGenerateCandidates(entityName)
+    }
+
     val presetPlatforms = listOf(
         PlatformType.TWITTER to "https://x.com/",
         PlatformType.YOUTUBE to "https://www.youtube.com/@",
@@ -74,6 +78,30 @@ fun AddChannelDialog(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+
+                if (recommendedChannels.isNotEmpty()) {
+                    Text(
+                        text = "智能匹配到的「$entityName」官方账号：",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        recommendedChannels.forEach { rec ->
+                            SuggestionChip(
+                                onClick = {
+                                    inputUrlOrHandle = rec.feedPathOrUrl
+                                    customTitle = rec.title
+                                },
+                                label = { Text("${rec.platformType.displayName}: ${rec.identifier}") }
+                            )
+                        }
+                    }
+                }
 
                 // 快捷模板选择行
                 Row(

@@ -118,8 +118,8 @@ fun HubScreen(
     if (showAddEntityDialog) {
         AddEntityDialog(
             onDismiss = { showAddEntityDialog = false },
-            onConfirm = { name, bio, avatarUrl, isVip, category ->
-                viewModel.addEntity(name, bio, avatarUrl, isVip, category)
+            onConfirm = { name, bio, avatarUrl, isVip, category, selectedChannels ->
+                viewModel.addEntityWithChannels(name, bio, avatarUrl, isVip, category, selectedChannels)
             }
         )
     }

@@ -12,6 +12,7 @@ import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
+import java.io.IOException
 import java.util.concurrent.TimeUnit
 
 class FeedRepository(
@@ -22,11 +23,19 @@ class FeedRepository(
     private val channelDao = database.channelDao()
     private val feedDao = database.feedDao()
 
-    private val httpClient = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(20, TimeUnit.SECONDS)
-        .followRedirects(true)
-        .build()
+    private fun getHttpClient(): OkHttpClient {
+        val builder = OkHttpClient.Builder()
+            .connectTimeout(12, TimeUnit.SECONDS)
+            .readTimeout(18, TimeUnit.SECONDS)
+            .retryOnConnectionFailure(true)
+            .followRedirects(true)
+
+        val proxy = nodeManager.getProxy()
+        if (proxy != null) {
+            builder.proxy(proxy)
+        }
+        return builder.build()
+    }
 
     // --- Entity Operations ---
     fun observeEntitiesWithStats(): Flow<List<EntityWithUnreadCount>> =
@@ -99,6 +108,10 @@ class FeedRepository(
         )
     }
 
+    suspend fun addChannels(channels: List<SourceChannelRecord>) {
+        channelDao.insertAll(channels)
+    }
+
     suspend fun deleteChannel(channel: SourceChannelRecord) {
         channelDao.delete(channel)
     }
@@ -138,19 +151,19 @@ class FeedRepository(
     // --- Sync & Network Engine ---
 
     /**
-     * 测试指定的订阅源，返回抓取到的最新一条动态预览，若失败则抛出异常。
+     * 测试指定的订阅源，返回抓取到的最新一条动态预览，若失败则抛出包含诊断建议的异常。
      */
     suspend fun testChannel(feedPathOrUrl: String): ParsedFeedItem = withContext(Dispatchers.IO) {
         val xml = fetchFeedXml(feedPathOrUrl)
         val parsed = FeedParser.parse(xml)
         if (parsed.items.isEmpty()) {
-            throw IllegalStateException("解析成功，但该源暂无任何动态内容")
+            throw IllegalStateException("连接成功，但该频道近期未发布任何公开动态")
         }
         parsed.items.first()
     }
 
     /**
-     * 同步单个频道，返回本次抓取到的“全新动态项”列表（未曾入库且晚于上次同步时间）
+     * 同步单个频道，返回本次抓取到的“全新动态项”列表
      */
     suspend fun syncChannel(channel: SourceChannelRecord): List<FeedItemRecord> = withContext(Dispatchers.IO) {
         val newSavedItems = mutableListOf<FeedItemRecord>()
@@ -179,20 +192,20 @@ class FeedRepository(
 
                 val rowId = feedDao.insertIgnore(record)
                 if (rowId != -1L) {
-                    // 成功插入新记录
                     newSavedItems.add(record.copy(id = rowId))
                 }
             }
 
             channelDao.updateSyncStatus(channel.id, System.currentTimeMillis(), null)
         } catch (e: Exception) {
-            channelDao.updateSyncStatus(channel.id, System.currentTimeMillis(), e.localizedMessage ?: "同步失败")
+            val errorMsg = e.localizedMessage ?: "同步失败"
+            channelDao.updateSyncStatus(channel.id, System.currentTimeMillis(), errorMsg)
         }
         newSavedItems
     }
 
     /**
-     * 同步所有已启用的频道，返回所有新入库的动态项（用于通知系统触发提醒）
+     * 同步所有已启用的频道
      */
     suspend fun syncAllChannels(): List<Pair<SourceChannelRecord, List<FeedItemRecord>>> = withContext(Dispatchers.IO) {
         val channels = channelDao.getAllEnabledChannels()
@@ -211,13 +224,18 @@ class FeedRepository(
                 feedPathOrUrl.startsWith("https://", ignoreCase = true)
 
         if (isDirectUrl) {
-            return@withContext executeRequest(feedPathOrUrl)
+            try {
+                return@withContext executeRequest(feedPathOrUrl)
+            } catch (e: Exception) {
+                throw diagnoseNetworkError(e, feedPathOrUrl)
+            }
         }
 
-        // 社媒类走 RSSHub 节点池
+        // 路径为社媒路由（如 /twitter/user/...）
         val candidateNodes = nodeManager.getAllCandidateNodes()
         var lastError: Exception? = null
 
+        // 1. 尝试配置的所有 RSSHub 节点池
         for (node in candidateNodes) {
             val fullUrl = PlatformResolver.buildFinalUrl(
                 feedPathOrUrl = feedPathOrUrl,
@@ -231,19 +249,36 @@ class FeedRepository(
             }
         }
 
-        throw lastError ?: IllegalStateException("无法连接到任何 RSSHub 节点，请在设置中配置有效节点或检查网络")
+        // 2. 若为 X / Twitter 且 RSSHub 均无法连接，尝试备用 Nitter 镜像池
+        if (feedPathOrUrl.startsWith("/twitter/user/", ignoreCase = true)) {
+            val username = feedPathOrUrl.removePrefix("/twitter/user/").trim()
+            val nitterMirrors = listOf(
+                "https://nitter.privacydev.net/$username/rss",
+                "https://xcancel.com/$username/rss",
+                "https://nitter.poast.org/$username/rss"
+            )
+            for (mirror in nitterMirrors) {
+                try {
+                    return@withContext executeRequest(mirror)
+                } catch (e: Exception) {
+                    lastError = e
+                }
+            }
+        }
+
+        throw diagnoseNetworkError(lastError ?: IllegalStateException("无法连通节点"), feedPathOrUrl)
     }
 
     private fun executeRequest(url: String): String {
         val request = Request.Builder()
             .url(url)
-            .header("User-Agent", "Mozilla/5.0 (Linux; Android 14; EntityPulse) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36")
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
             .header("Accept", "application/rss+xml, application/atom+xml, application/xml, text/xml;q=0.9, */*;q=0.8")
             .build()
 
-        httpClient.newCall(request).execute().use { response ->
+        getHttpClient().newCall(request).execute().use { response ->
             if (!response.isSuccessful) {
-                throw IllegalStateException("HTTP ${response.code}: ${response.message}")
+                throw IllegalStateException("HTTP ${response.code} ${response.message}")
             }
             val body = response.body?.string()
             if (body.isNullOrBlank()) {
@@ -251,5 +286,21 @@ class FeedRepository(
             }
             return body
         }
+    }
+
+    private fun diagnoseNetworkError(e: Throwable, target: String): Exception {
+        val msg = e.localizedMessage ?: ""
+        val isConnectionClosed = msg.contains("closed", ignoreCase = true) ||
+                msg.contains("reset", ignoreCase = true) ||
+                msg.contains("EOF", ignoreCase = true)
+        val isTimeout = msg.contains("timeout", ignoreCase = true) || msg.contains("timed out", ignoreCase = true)
+
+        val friendlyReason = when {
+            isConnectionClosed -> "连接被对端中断或重置 (Connection closed)。若正在访问 X/Twitter、YouTube 等海外站点，通常由于国内直连受限，请在【设置】中配置本地代理端口 (如 127.0.0.1:7890) 或开启网络加速后重试。"
+            isTimeout -> "请求超时。目标服务器响应过慢，请检查网络环境或在【设置】中切换自建 RSSHub 节点。"
+            msg.contains("403") || msg.contains("404") -> "目标源受限或不存在 ($msg)。建议在【设置】中配置具备鉴权 Token 的自建 RSSHub 实例。"
+            else -> "网络连接失败: $msg"
+        }
+        return IllegalStateException(friendlyReason, e)
     }
 }

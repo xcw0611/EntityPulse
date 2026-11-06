@@ -31,6 +31,10 @@ fun SettingsScreen(viewModel: MainViewModel) {
     var dndStartHour by remember { mutableIntStateOf(nodeManager.dndStartHour) }
     var dndEndHour by remember { mutableIntStateOf(nodeManager.dndEndHour) }
 
+    var proxyEnabled by remember { mutableStateOf(nodeManager.isProxyEnabled) }
+    var proxyHost by remember { mutableStateOf(nodeManager.proxyHost) }
+    var proxyPort by remember { mutableIntStateOf(nodeManager.proxyPort) }
+
     // SAF 文件选择器
     val exportJsonLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/json")
@@ -200,6 +204,71 @@ fun SettingsScreen(viewModel: MainViewModel) {
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.outline
                     )
+                }
+            }
+
+            // Section 2.5: 网络加速与应用内置代理 (解决海外平台连接被重置问题)
+            Text(
+                text = "网络加速与应用内置代理",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
+            )
+
+            Card(
+                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        text = "若拉取 X/Twitter、YouTube 等海外动态时提示连接被重置 (Connection closed)，可开启本项将应用网络请求直通手机上运行的网络加速工具 (如 Clash / Surfboard / v2ray 等，默认端口 7890)：",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("启用应用网络代理", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                        Switch(
+                            checked = proxyEnabled,
+                            onCheckedChange = {
+                                proxyEnabled = it
+                                viewModel.updateProxySettings(it, proxyHost, proxyPort)
+                            }
+                        )
+                    }
+
+                    if (proxyEnabled) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = proxyHost,
+                                onValueChange = {
+                                    proxyHost = it
+                                    viewModel.updateProxySettings(proxyEnabled, it, proxyPort)
+                                },
+                                label = { Text("代理 IP") },
+                                singleLine = true,
+                                modifier = Modifier.weight(2f)
+                            )
+                            OutlinedTextField(
+                                value = proxyPort.toString(),
+                                onValueChange = {
+                                    val p = it.toIntOrNull() ?: 7890
+                                    proxyPort = p
+                                    viewModel.updateProxySettings(proxyEnabled, proxyHost, p)
+                                },
+                                label = { Text("端口") },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
                 }
             }
 
