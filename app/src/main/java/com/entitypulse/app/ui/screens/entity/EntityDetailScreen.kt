@@ -19,6 +19,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.entitypulse.app.data.model.SourceChannelRecord
+import com.entitypulse.app.data.model.TimeRangeFilter
 import com.entitypulse.app.ui.MainViewModel
 import com.entitypulse.app.ui.dialogs.AddChannelDialog
 import com.entitypulse.app.ui.screens.feed.FeedItemCard
@@ -43,6 +44,14 @@ fun EntityDetailScreen(
         viewModel.repository.observeFeeds(entityId)
     }
     val feeds by feedsFlow.collectAsState(initial = emptyList())
+    val timeRangeFilter by viewModel.timeRangeFilter.collectAsState()
+    var showTimeMenu by remember { mutableStateOf(false) }
+
+    val filteredFeeds = remember(feeds, timeRangeFilter) {
+        val now = System.currentTimeMillis()
+        val cutoff = if (timeRangeFilter == TimeRangeFilter.ALL) 0L else (now - timeRangeFilter.durationMillis)
+        feeds.filter { it.item.publishedAt >= cutoff }
+    }
 
     var showAddChannelDialog by remember { mutableStateOf(false) }
     var showDeleteConfirmDialog by remember { mutableStateOf(false) }
@@ -288,24 +297,76 @@ fun EntityDetailScreen(
             // 3. 历史动态流列表
             item {
                 Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = "聚合动态历史 (${feeds.size})",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "聚合动态 (${filteredFeeds.size})",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+
+                    Box {
+                        FilledTonalButton(
+                            onClick = { showTimeMenu = true },
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                            modifier = Modifier.height(30.dp)
+                        ) {
+                            Icon(Icons.Default.DateRange, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(timeRangeFilter.displayName, style = MaterialTheme.typography.labelSmall)
+                            Icon(Icons.Default.ArrowDropDown, contentDescription = null, modifier = Modifier.size(14.dp))
+                        }
+
+                        DropdownMenu(
+                            expanded = showTimeMenu,
+                            onDismissRequest = { showTimeMenu = false }
+                        ) {
+                            TimeRangeFilter.values().forEach { filter ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            if (timeRangeFilter == filter) {
+                                                Icon(
+                                                    Icons.Default.Check,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(16.dp),
+                                                    tint = MaterialTheme.colorScheme.primary
+                                                )
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                            } else {
+                                                Spacer(modifier = Modifier.width(22.dp))
+                                            }
+                                            Text(
+                                                text = if (filter == TimeRangeFilter.DEFAULT) "${filter.displayName} (默认)" else filter.displayName,
+                                                fontWeight = if (timeRangeFilter == filter) FontWeight.Bold else FontWeight.Normal
+                                            )
+                                        }
+                                    },
+                                    onClick = {
+                                        viewModel.setTimeRangeFilter(filter)
+                                        showTimeMenu = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
             }
 
-            if (feeds.isEmpty()) {
+            if (filteredFeeds.isEmpty()) {
                 item {
                     Text(
-                        text = "暂无抓取到的历史动态，点击右上角刷新进行抓取",
+                        text = if (feeds.isNotEmpty()) "在当前时间范围 (${timeRangeFilter.displayName}) 内暂无动态，可切换为「全部历史」查看" else "暂无抓取到的历史动态，点击右上角刷新进行抓取",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.outline,
                         modifier = Modifier.padding(vertical = 12.dp)
                     )
                 }
             } else {
-                items(feeds, key = { it.item.id }) { itemWithMeta ->
+                items(filteredFeeds, key = { it.item.id }) { itemWithMeta ->
                     FeedItemCard(
                         item = itemWithMeta,
                         onClick = { onNavigateToPost(itemWithMeta.item.id) },

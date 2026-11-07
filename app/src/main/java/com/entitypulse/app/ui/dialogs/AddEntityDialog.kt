@@ -6,8 +6,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -15,9 +14,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.entitypulse.app.data.model.EntityCatalog
+import com.entitypulse.app.data.model.PlatformCandidateGroup
 import com.entitypulse.app.data.model.PredefinedChannel
+import com.entitypulse.app.network.OnlineEntityLocator
 import com.entitypulse.app.ui.screens.feed.PlatformBadge
 import com.entitypulse.app.ui.theme.VipGold
+import kotlinx.coroutines.launch
 
 @Composable
 fun AddEntityDialog(
@@ -31,33 +33,46 @@ fun AddEntityDialog(
         selectedChannels: List<PredefinedChannel>
     ) -> Unit
 ) {
+    val coroutineScope = rememberCoroutineScope()
+
     var name by remember { mutableStateOf("") }
     var bio by remember { mutableStateOf("") }
     var avatarUrl by remember { mutableStateOf("") }
     var category by remember { mutableStateOf("游戏 / 创作者") }
     var isVip by remember { mutableStateOf(false) }
 
-    // 智能推断的跨平台账号候选列表与勾选状态
-    var candidateChannels by remember { mutableStateOf<List<PredefinedChannel>>(emptyList()) }
-    val selectedChannelMap = remember { mutableStateMapOf<String, Boolean>() }
+    // 智能推断与多变体候选组列表
+    var candidateGroups by remember { mutableStateOf<List<PlatformCandidateGroup>>(emptyList()) }
+    var isSearchingOnline by remember { mutableStateOf(false) }
+    var onlineDiscoveredCount by remember { mutableIntStateOf(0) }
 
-    // 当主体名称改变时，自动触发跨平台账号智能识别
+    // 当主体名称改变时，自动触发跨平台多变体规则生成 + 全网在线联想探测
     LaunchedEffect(name) {
-        if (name.isNotBlank()) {
-            val candidates = EntityCatalog.findOrGenerateCandidates(name)
-            candidateChannels = candidates
-            candidates.forEach { ch ->
-                if (!selectedChannelMap.containsKey(ch.feedPathOrUrl)) {
-                    selectedChannelMap[ch.feedPathOrUrl] = ch.defaultSelected
+        val query = name.trim()
+        if (query.isNotBlank()) {
+            // 1. 规则引擎秒级生成初始多变体
+            candidateGroups = EntityCatalog.generateGroupedCandidates(query)
+
+            // 2. 异步全网探测（DuckDuckGo / B站 / 维基等）
+            isSearchingOnline = true
+            onlineDiscoveredCount = 0
+            coroutineScope.launch {
+                val additions = OnlineEntityLocator.searchOnlineCandidates(query)
+                isSearchingOnline = false
+                if (additions.isNotEmpty()) {
+                    onlineDiscoveredCount = additions.size
+                    // 重新以合并后的在线结果渲染候选组
+                    candidateGroups = EntityCatalog.generateGroupedCandidates(query, additions)
                 }
             }
         } else {
-            candidateChannels = emptyList()
-            selectedChannelMap.clear()
+            candidateGroups = emptyList()
+            isSearchingOnline = false
+            onlineDiscoveredCount = 0
         }
     }
 
-    val selectedCount = candidateChannels.count { selectedChannelMap[it.feedPathOrUrl] == true }
+    val selectedCount = candidateGroups.count { it.isEnabled }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -81,7 +96,7 @@ fun AddEntityDialog(
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Text(
-                    text = "快速选择或输入主体，系统将自动识别并提供各平台官方账号一键绑定：",
+                    text = "输入主体名称，系统将结合【智能全网定位】与【多变体账号候选】，为您推荐各社媒的最佳可能账户：",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -101,11 +116,7 @@ fun AddEntityDialog(
                                 avatarUrl = popular.avatarUrl ?: ""
                                 category = popular.category
                                 isVip = popular.isVip
-                                candidateChannels = popular.channels
-                                selectedChannelMap.clear()
-                                popular.channels.forEach { ch ->
-                                    selectedChannelMap[ch.feedPathOrUrl] = true
-                                }
+                                candidateGroups = EntityCatalog.generateGroupedCandidates(popular.name)
                             },
                             label = { Text(popular.name) }
                         )
@@ -115,17 +126,29 @@ fun AddEntityDialog(
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
-                    label = { Text("主体名称 (例如: Team Cherry)") },
+                    label = { Text("主体名称 (例如: Team Cherry / 游戏科学)") },
                     singleLine = true,
+                    trailingIcon = {
+                        if (isSearchingOnline) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                        } else if (onlineDiscoveredCount > 0) {
+                            Icon(
+                                imageVector = Icons.Default.CheckCircle,
+                                contentDescription = "已探测",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    },
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                // --- 智能候选账号展示与多选区域 ---
-                if (candidateChannels.isNotEmpty()) {
+                // --- 智能候选账号多平台分组确认面板 ---
+                if (candidateGroups.isNotEmpty()) {
                     Card(
                         shape = RoundedCornerShape(12.dp),
                         colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.4f)
+                            containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.35f)
                         ),
                         modifier = Modifier.fillMaxWidth()
                     ) {
@@ -135,57 +158,121 @@ fun AddEntityDialog(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text(
-                                    text = "发现各平台账号 ($selectedCount/${candidateChannels.size})",
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSecondaryContainer
-                                )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = "匹配各平台账号 ($selectedCount/${candidateGroups.size})",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                                    )
+                                    if (isSearchingOnline) {
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = "全网探测中...",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                    } else if (onlineDiscoveredCount > 0) {
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = "已联想 $onlineDiscoveredCount 个变体",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.tertiary
+                                        )
+                                    }
+                                }
+
                                 TextButton(
                                     onClick = {
-                                        val allSelected = candidateChannels.all { selectedChannelMap[it.feedPathOrUrl] == true }
-                                        candidateChannels.forEach { ch ->
-                                            selectedChannelMap[ch.feedPathOrUrl] = !allSelected
-                                        }
+                                        val allSelected = candidateGroups.all { it.isEnabled }
+                                        candidateGroups = candidateGroups.map { it.copy(isEnabled = !allSelected) }
                                     },
                                     contentPadding = PaddingValues(0.dp)
                                 ) {
                                     Text(
-                                        if (candidateChannels.all { selectedChannelMap[it.feedPathOrUrl] == true }) "取消全选" else "全选",
+                                        if (candidateGroups.all { it.isEnabled }) "取消全选" else "全选",
                                         style = MaterialTheme.typography.labelMedium
                                     )
                                 }
                             }
 
-                            Spacer(modifier = Modifier.height(6.dp))
+                            Spacer(modifier = Modifier.height(4.dp))
 
-                            candidateChannels.forEach { channel ->
-                                val isChecked = selectedChannelMap[channel.feedPathOrUrl] == true
-                                Row(
+                            candidateGroups.forEachIndexed { groupIdx, group ->
+                                Card(
+                                    shape = RoundedCornerShape(8.dp),
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = if (group.isEnabled) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.surface.copy(alpha = 0.6f)
+                                    ),
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(vertical = 4.dp),
-                                    verticalAlignment = Alignment.CenterVertically
+                                        .padding(vertical = 4.dp)
                                 ) {
-                                    Checkbox(
-                                        checked = isChecked,
-                                        onCheckedChange = { checked ->
-                                            selectedChannelMap[channel.feedPathOrUrl] = checked
+                                    Column(modifier = Modifier.padding(8.dp)) {
+                                        // 平台主信息
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Checkbox(
+                                                checked = group.isEnabled,
+                                                onCheckedChange = { checked ->
+                                                    candidateGroups = candidateGroups.toMutableList().also { list ->
+                                                        list[groupIdx] = group.copy(isEnabled = checked)
+                                                    }
+                                                }
+                                            )
+                                            PlatformBadge(group.platformType)
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(
+                                                    text = group.currentSelectedChannel.identifier,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                                Text(
+                                                    text = "${group.currentSelectedChannel.title} [${group.currentSelectedChannel.probabilityNote}]",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = MaterialTheme.colorScheme.outline
+                                                )
+                                            }
                                         }
-                                    )
-                                    PlatformBadge(channel.platformType)
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = channel.title,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            fontWeight = FontWeight.Medium
-                                        )
-                                        Text(
-                                            text = channel.identifier,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.outline
-                                        )
+
+                                        // 若存在多个备选可能账户（解决不同社媒命名差异），展示切换 Chips
+                                        if (group.isEnabled && group.candidates.size > 1) {
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            Text(
+                                                text = "备选可能账户 (点击切换):",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.padding(start = 8.dp)
+                                            )
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .horizontalScroll(rememberScrollState())
+                                                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                            ) {
+                                                group.candidates.forEachIndexed { candIdx, cand ->
+                                                    val isChosen = group.selectedIndex == candIdx
+                                                    FilterChip(
+                                                        selected = isChosen,
+                                                        onClick = {
+                                                            candidateGroups = candidateGroups.toMutableList().also { list ->
+                                                                list[groupIdx] = group.copy(selectedIndex = candIdx)
+                                                            }
+                                                        },
+                                                        label = {
+                                                            Text(
+                                                                text = "${cand.identifier} (${cand.probabilityNote})",
+                                                                style = MaterialTheme.typography.labelSmall
+                                                            )
+                                                        }
+                                                    )
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -249,8 +336,10 @@ fun AddEntityDialog(
             Button(
                 onClick = {
                     if (name.isNotBlank()) {
-                        val chosen = candidateChannels.filter { selectedChannelMap[it.feedPathOrUrl] == true }
-                        onConfirm(name, bio, avatarUrl, isVip, category, chosen)
+                        val chosenChannels = candidateGroups
+                            .filter { it.isEnabled }
+                            .map { it.currentSelectedChannel }
+                        onConfirm(name, bio, avatarUrl, isVip, category, chosenChannels)
                         onDismiss()
                     }
                 },

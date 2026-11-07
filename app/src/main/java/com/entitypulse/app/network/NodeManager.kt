@@ -27,6 +27,7 @@ class NodeManager(context: Context) {
         const val PREF_PROXY_TYPE = "pref_proxy_type"
         const val PREF_PROXY_HOST = "pref_proxy_host"
         const val PREF_PROXY_PORT = "pref_proxy_port"
+        const val PREF_TIME_RANGE = "pref_time_range"
 
         val PUBLIC_MIRRORS = listOf(
             "https://rsshub.app",
@@ -75,6 +76,15 @@ class NodeManager(context: Context) {
     var proxyPort: Int
         get() = prefs.getInt(PREF_PROXY_PORT, 7890)
         set(value) = prefs.edit().putInt(PREF_PROXY_PORT, value).apply()
+
+    var defaultTimeRange: com.entitypulse.app.data.model.TimeRangeFilter
+        get() {
+            val raw = prefs.getString(PREF_TIME_RANGE, com.entitypulse.app.data.model.TimeRangeFilter.DEFAULT.name)
+            return runCatching {
+                com.entitypulse.app.data.model.TimeRangeFilter.valueOf(raw ?: com.entitypulse.app.data.model.TimeRangeFilter.DEFAULT.name)
+            }.getOrDefault(com.entitypulse.app.data.model.TimeRangeFilter.DEFAULT)
+        }
+        set(value) = prefs.edit().putString(PREF_TIME_RANGE, value.name).apply()
 
     fun getProxy(): Proxy? {
         if (!isProxyEnabled) return null

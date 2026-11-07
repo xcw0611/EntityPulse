@@ -5,8 +5,19 @@ data class PredefinedChannel(
     val identifier: String,
     val title: String,
     val feedPathOrUrl: String,
-    val defaultSelected: Boolean = true
+    val defaultSelected: Boolean = true,
+    val probabilityNote: String = "推测"
 )
+
+data class PlatformCandidateGroup(
+    val platformType: PlatformType,
+    val candidates: List<PredefinedChannel>,
+    var selectedIndex: Int = 0,
+    var isEnabled: Boolean = true
+) {
+    val currentSelectedChannel: PredefinedChannel
+        get() = candidates.getOrNull(selectedIndex) ?: candidates.first()
+}
 
 data class PredefinedEntity(
     val name: String,
@@ -207,60 +218,168 @@ object EntityCatalog {
     /**
      * 智能猜测与匹配：
      * 1. 优先在内置知名主体库中模糊匹配；
-     * 2. 若未匹配到，则根据输入名称自动推断主流平台的默认 Handle / 路由，供用户一键勾选。
+     * 2. 若未匹配到，则针对各平台生成多个易混淆/高概率备选 Handle，并结合全网在线搜索结果；
+     * 3. 按平台分组呈现，供用户在弹窗内灵活挑选、切换或微调。
      */
-    fun findOrGenerateCandidates(query: String): List<PredefinedChannel> {
+    fun generateGroupedCandidates(
+        query: String,
+        onlineAdditions: List<PredefinedChannel> = emptyList()
+    ): List<PlatformCandidateGroup> {
         val trimmed = query.trim()
         if (trimmed.isBlank()) return emptyList()
 
-        // 1. 精确或模糊匹配内置库
+        val clean = trimmed.replace("\\s+".toRegex(), "").filter { it.isLetterOrDigit() || it == '_' }
+
+        // 1. 若匹配到内置知名库
         val match = POPULAR_ENTITIES.firstOrNull {
             it.name.contains(trimmed, ignoreCase = true) || trimmed.contains(it.name, ignoreCase = true)
         }
+
         if (match != null) {
-            return match.channels
+            val groups = mutableListOf<PlatformCandidateGroup>()
+            val channelsByPlatform = match.channels.groupBy { it.platformType }
+
+            for ((platform, channels) in channelsByPlatform) {
+                val candidateList = channels.map { it.copy(probabilityNote = "官方认证") }.toMutableList()
+
+                // 补充常见备选变体
+                if (platform == PlatformType.TWITTER && clean.isNotBlank()) {
+                    val rawHandle = "@$clean"
+                    if (candidateList.none { it.identifier.equals(rawHandle, ignoreCase = true) }) {
+                        candidateList.add(
+                            PredefinedChannel(
+                                platformType = PlatformType.TWITTER,
+                                identifier = rawHandle,
+                                title = "X / Twitter ($rawHandle)",
+                                feedPathOrUrl = "/twitter/user/$clean",
+                                defaultSelected = false,
+                                probabilityNote = "通用简称"
+                            )
+                        )
+                    }
+                }
+
+                // 注入全网在线探测到的候选项
+                val onlineMatches = onlineAdditions.filter { it.platformType == platform }
+                for (onl in onlineMatches) {
+                    if (candidateList.none { it.identifier.equals(onl.identifier, ignoreCase = true) }) {
+                        candidateList.add(onl)
+                    }
+                }
+
+                groups.add(
+                    PlatformCandidateGroup(
+                        platformType = platform,
+                        candidates = candidateList,
+                        selectedIndex = 0,
+                        isEnabled = true
+                    )
+                )
+            }
+            return groups
         }
 
-        // 2. 通用推测生成器 (将名称转为无空格的标准 handle)
-        val cleanHandle = trimmed.replace("\\s+".toRegex(), "").filter { it.isLetterOrDigit() || it == '_' }
-        if (cleanHandle.isBlank()) return emptyList()
+        // 2. 自定义输入：智能衍生跨平台多候选方案
+        if (clean.isBlank()) return emptyList()
 
-        return listOf(
-            PredefinedChannel(
-                platformType = PlatformType.TWITTER,
-                identifier = "@$cleanHandle",
-                title = "X / Twitter (@$cleanHandle)",
-                feedPathOrUrl = "/twitter/user/$cleanHandle",
-                defaultSelected = true
-            ),
-            PredefinedChannel(
-                platformType = PlatformType.YOUTUBE,
-                identifier = "@$cleanHandle",
-                title = "YouTube (@$cleanHandle)",
-                feedPathOrUrl = "/youtube/user/@$cleanHandle",
-                defaultSelected = true
-            ),
-            PredefinedChannel(
-                platformType = PlatformType.REDDIT,
-                identifier = "r/$cleanHandle",
-                title = "Reddit (r/$cleanHandle)",
-                feedPathOrUrl = "https://www.reddit.com/r/$cleanHandle/.rss",
-                defaultSelected = false
-            ),
-            PredefinedChannel(
-                platformType = PlatformType.BLUESKY,
-                identifier = "$cleanHandle.bsky.social",
-                title = "Bluesky ($cleanHandle.bsky.social)",
-                feedPathOrUrl = "/bluesky/profile/$cleanHandle.bsky.social",
-                defaultSelected = false
-            ),
-            PredefinedChannel(
-                platformType = PlatformType.GITHUB,
-                identifier = cleanHandle,
-                title = "GitHub ($cleanHandle)",
-                feedPathOrUrl = "https://github.com/$cleanHandle.atom",
-                defaultSelected = false
+        val groups = mutableListOf<PlatformCandidateGroup>()
+
+        // (1) X / Twitter 候选组
+        val twitterCandidates = mutableListOf(
+            PredefinedChannel(PlatformType.TWITTER, "@$clean", "X / Twitter (@$clean)", "/twitter/user/$clean", true, "标准账号"),
+            PredefinedChannel(PlatformType.TWITTER, "@${clean}Games", "X / Twitter (@${clean}Games)", "/twitter/user/${clean}Games", false, "游戏专用"),
+            PredefinedChannel(PlatformType.TWITTER, "@${clean}Official", "X / Twitter (@${clean}Official)", "/twitter/user/${clean}Official", false, "官方后缀"),
+            PredefinedChannel(PlatformType.TWITTER, "@${clean}Studio", "X / Twitter (@${clean}Studio)", "/twitter/user/${clean}Studio", false, "工作室"),
+            PredefinedChannel(PlatformType.TWITTER, "@${clean}_CN", "X / Twitter (@${clean}_CN)", "/twitter/user/${clean}_CN", false, "中文区")
+        )
+        onlineAdditions.filter { it.platformType == PlatformType.TWITTER }.forEach { onl ->
+            if (twitterCandidates.none { it.identifier.equals(onl.identifier, ignoreCase = true) }) {
+                twitterCandidates.add(onl)
+            }
+        }
+        groups.add(PlatformCandidateGroup(PlatformType.TWITTER, twitterCandidates, 0, true))
+
+        // (2) YouTube 候选组
+        val ytCandidates = mutableListOf(
+            PredefinedChannel(PlatformType.YOUTUBE, "@$clean", "YouTube (@$clean)", "/youtube/user/@$clean", true, "标准频道"),
+            PredefinedChannel(PlatformType.YOUTUBE, "@${clean}Official", "YouTube (@${clean}Official)", "/youtube/user/@${clean}Official", false, "官方认证"),
+            PredefinedChannel(PlatformType.YOUTUBE, "@${clean}Games", "YouTube (@${clean}Games)", "/youtube/user/@${clean}Games", false, "游戏频道")
+        )
+        onlineAdditions.filter { it.platformType == PlatformType.YOUTUBE }.forEach { onl ->
+            if (ytCandidates.none { it.identifier.equals(onl.identifier, ignoreCase = true) }) {
+                ytCandidates.add(onl)
+            }
+        }
+        groups.add(PlatformCandidateGroup(PlatformType.YOUTUBE, ytCandidates, 0, true))
+
+        // (3) Bilibili 候选组
+        val biliCandidates = mutableListOf(
+            PredefinedChannel(PlatformType.BILIBILI, trimmed, "Bilibili ($trimmed)", "/bilibili/user/video/$trimmed", false, "原名检索"),
+            PredefinedChannel(PlatformType.BILIBILI, "${trimmed}官方", "Bilibili (${trimmed}官方)", "/bilibili/user/video/${trimmed}官方", false, "官方账号"),
+            PredefinedChannel(PlatformType.BILIBILI, "${trimmed}工作室", "Bilibili (${trimmed}工作室)", "/bilibili/user/video/${trimmed}工作室", false, "团队账号")
+        )
+        onlineAdditions.filter { it.platformType == PlatformType.BILIBILI }.forEach { onl ->
+            if (biliCandidates.none { it.identifier.equals(onl.identifier, ignoreCase = true) }) {
+                biliCandidates.add(onl)
+            }
+        }
+        groups.add(PlatformCandidateGroup(PlatformType.BILIBILI, biliCandidates, 0, false))
+
+        // (4) Steam 候选组
+        groups.add(
+            PlatformCandidateGroup(
+                PlatformType.STEAM,
+                listOf(
+                    PredefinedChannel(PlatformType.STEAM, trimmed, "Steam · $trimmed 官方公告", "https://steamcommunity.com/search/groups/?text=$clean", false, "公告源")
+                ),
+                0,
+                false
             )
         )
+
+        // (5) Reddit 候选组
+        groups.add(
+            PlatformCandidateGroup(
+                PlatformType.REDDIT,
+                listOf(
+                    PredefinedChannel(PlatformType.REDDIT, "r/$clean", "Reddit (r/$clean)", "https://www.reddit.com/r/$clean/.rss", false, "社区主版"),
+                    PredefinedChannel(PlatformType.REDDIT, "r/${clean}Game", "Reddit (r/${clean}Game)", "https://www.reddit.com/r/${clean}Game/.rss", false, "游戏专版")
+                ),
+                0,
+                false
+            )
+        )
+
+        // (6) Bluesky 候选组
+        groups.add(
+            PlatformCandidateGroup(
+                PlatformType.BLUESKY,
+                listOf(
+                    PredefinedChannel(PlatformType.BLUESKY, "$clean.bsky.social", "Bluesky ($clean.bsky.social)", "/bluesky/profile/$clean.bsky.social", false, "主域名"),
+                    PredefinedChannel(PlatformType.BLUESKY, "${clean}official.bsky.social", "Bluesky (${clean}official.bsky.social)", "/bluesky/profile/${clean}official.bsky.social", false, "官方后缀")
+                ),
+                0,
+                false
+            )
+        )
+
+        // (7) GitHub 候选组
+        groups.add(
+            PlatformCandidateGroup(
+                PlatformType.GITHUB,
+                listOf(
+                    PredefinedChannel(PlatformType.GITHUB, clean, "GitHub ($clean)", "https://github.com/$clean.atom", false, "主仓库动态"),
+                    PredefinedChannel(PlatformType.GITHUB, "$clean-org", "GitHub ($clean-org)", "https://github.com/$clean-org.atom", false, "组织动态")
+                ),
+                0,
+                false
+            )
+        )
+
+        return groups
+    }
+
+    fun findOrGenerateCandidates(query: String): List<PredefinedChannel> {
+        return generateGroupedCandidates(query).filter { it.isEnabled }.map { it.currentSelectedChannel }
     }
 }

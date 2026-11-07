@@ -40,20 +40,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _showUnreadOnly = MutableStateFlow(false)
     val showUnreadOnly: StateFlow<Boolean> = _showUnreadOnly.asStateFlow()
 
+    private val _timeRangeFilter = MutableStateFlow(nodeManager.defaultTimeRange)
+    val timeRangeFilter: StateFlow<TimeRangeFilter> = _timeRangeFilter.asStateFlow()
+
     @OptIn(ExperimentalCoroutinesApi::class)
     val feeds: StateFlow<List<FeedItemWithMeta>> = combine(
         _selectedEntityFilterId.flatMapLatest { id -> repository.observeFeeds(id) },
         _searchQuery,
-        _showUnreadOnly
-    ) { items, query, unreadOnly ->
+        _showUnreadOnly,
+        _timeRangeFilter
+    ) { items, query, unreadOnly, timeFilter ->
+        val now = System.currentTimeMillis()
+        val cutoff = if (timeFilter == TimeRangeFilter.ALL) 0L else (now - timeFilter.durationMillis)
         items.filter { item ->
+            val matchTime = item.item.publishedAt >= cutoff
             val matchQuery = if (query.isBlank()) true else {
                 item.item.title.contains(query, ignoreCase = true) ||
                         item.item.contentPlainText.contains(query, ignoreCase = true) ||
                         item.entityName.contains(query, ignoreCase = true)
             }
             val matchUnread = if (unreadOnly) !item.item.isRead else true
-            matchQuery && matchUnread
+            matchTime && matchQuery && matchUnread
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -73,6 +80,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun toggleShowUnreadOnly() {
+        _showUnreadOnly.value = !_showUnreadOnly.value
+    }
+
+    fun setTimeRangeFilter(filter: TimeRangeFilter) {
+        _timeRangeFilter.value = filter
+        nodeManager.defaultTimeRange = filter
+    }
+
+    fun searchOnlineCandidates(query: String, onResult: (List<PredefinedChannel>) -> Unit) {
+        viewModelScope.launch {
+            val candidates = com.entitypulse.app.network.OnlineEntityLocator.searchOnlineCandidates(query)
+            onResult(candidates)
+        }
+    }
+
+    suspend fun testCandidateChannel(feedUrl: String): Result<ParsedFeedItem> {
+        return runCatching { repository.testChannel(feedUrl) }
+    }
         _showUnreadOnly.value = !_showUnreadOnly.value
     }
 

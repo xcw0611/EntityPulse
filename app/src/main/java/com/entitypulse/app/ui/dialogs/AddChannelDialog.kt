@@ -12,7 +12,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.entitypulse.app.data.model.EntityCatalog
 import com.entitypulse.app.data.model.PlatformType
+import com.entitypulse.app.network.OnlineEntityLocator
 import com.entitypulse.app.network.ParsedFeedItem
 import com.entitypulse.app.network.PlatformResolver
 import com.entitypulse.app.network.ResolvedPlatform
@@ -48,8 +50,19 @@ fun AddChannelDialog(
         testResult = null
     }
 
-    val recommendedChannels = remember(entityName) {
-        com.entitypulse.app.data.model.EntityCatalog.findOrGenerateCandidates(entityName)
+    var groupedCandidates by remember(entityName) {
+        mutableStateOf(EntityCatalog.generateGroupedCandidates(entityName))
+    }
+
+    LaunchedEffect(entityName) {
+        val online = OnlineEntityLocator.searchOnlineCandidates(entityName)
+        if (online.isNotEmpty()) {
+            groupedCandidates = EntityCatalog.generateGroupedCandidates(entityName, online)
+        }
+    }
+
+    val allCandidateChannels = remember(groupedCandidates) {
+        groupedCandidates.flatMap { it.candidates }
     }
 
     val presetPlatforms = listOf(
@@ -79,9 +92,9 @@ fun AddChannelDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
-                if (recommendedChannels.isNotEmpty()) {
+                if (allCandidateChannels.isNotEmpty()) {
                     Text(
-                        text = "智能匹配到的「$entityName」官方账号：",
+                        text = "智能匹配与全网联想到的「$entityName」可能账号：",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.primary
                     )
@@ -91,13 +104,13 @@ fun AddChannelDialog(
                             .horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        recommendedChannels.forEach { rec ->
+                        allCandidateChannels.forEach { rec ->
                             SuggestionChip(
                                 onClick = {
                                     inputUrlOrHandle = rec.feedPathOrUrl
                                     customTitle = rec.title
                                 },
-                                label = { Text("${rec.platformType.displayName}: ${rec.identifier}") }
+                                label = { Text("${rec.platformType.displayName}: ${rec.identifier} (${rec.probabilityNote})") }
                             )
                         }
                     }

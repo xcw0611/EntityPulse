@@ -15,6 +15,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.entitypulse.app.data.model.TimeRangeFilter
 import com.entitypulse.app.network.NodeManager
 import com.entitypulse.app.ui.MainViewModel
 
@@ -30,6 +31,7 @@ fun SettingsScreen(viewModel: MainViewModel) {
     var dndEnabled by remember { mutableStateOf(nodeManager.isDndEnabled) }
     var dndStartHour by remember { mutableIntStateOf(nodeManager.dndStartHour) }
     var dndEndHour by remember { mutableIntStateOf(nodeManager.dndEndHour) }
+    var defaultTimeRange by remember { mutableStateOf(nodeManager.defaultTimeRange) }
 
     var proxyEnabled by remember { mutableStateOf(nodeManager.isProxyEnabled) }
     var proxyType by remember { mutableStateOf(nodeManager.proxyType) }
@@ -144,6 +146,34 @@ fun SettingsScreen(viewModel: MainViewModel) {
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = FontWeight.Bold
                             )
+                        }
+                    }
+
+                    HorizontalDivider()
+
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("默认动态加载范围", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "过滤早于该时间窗口的历史投稿，保障动态流的最新鲜度（可在各页面实时灵活切换）",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.outline
+                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            TimeRangeFilter.values().forEach { filter ->
+                                FilterChip(
+                                    selected = defaultTimeRange == filter,
+                                    onClick = {
+                                        defaultTimeRange = filter
+                                        viewModel.setTimeRangeFilter(filter)
+                                    },
+                                    label = { Text(if (filter == TimeRangeFilter.DEFAULT) "${filter.displayName} (推荐)" else filter.displayName) }
+                                )
+                            }
                         }
                     }
 

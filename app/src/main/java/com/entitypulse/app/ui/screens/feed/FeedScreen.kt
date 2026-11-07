@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.entitypulse.app.data.model.FeedItemWithMeta
 import com.entitypulse.app.data.model.PlatformType
+import com.entitypulse.app.data.model.TimeRangeFilter
 import com.entitypulse.app.network.TranslationManager
 import com.entitypulse.app.ui.MainViewModel
 import com.entitypulse.app.ui.screens.hub.formatRelativeTime
@@ -43,6 +44,8 @@ fun FeedScreen(
     val selectedEntityId by viewModel.selectedEntityFilterId.collectAsState()
     val isRefreshing by viewModel.isRefreshing.collectAsState()
     val showUnreadOnly by viewModel.showUnreadOnly.collectAsState()
+    val timeRangeFilter by viewModel.timeRangeFilter.collectAsState()
+    var showTimeMenu by remember { mutableStateOf(false) }
     var searchActive by remember { mutableStateOf(false) }
     val searchQuery by viewModel.searchQuery.collectAsState()
 
@@ -57,6 +60,52 @@ fun FeedScreen(
                     )
                 },
                 actions = {
+                    // 时间跨度筛选下拉
+                    Box {
+                        FilledTonalButton(
+                            onClick = { showTimeMenu = true },
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                            modifier = Modifier.height(34.dp)
+                        ) {
+                            Icon(Icons.Default.DateRange, contentDescription = null, modifier = Modifier.size(15.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(timeRangeFilter.displayName, style = MaterialTheme.typography.labelMedium)
+                            Icon(Icons.Default.ArrowDropDown, contentDescription = null, modifier = Modifier.size(16.dp))
+                        }
+                        DropdownMenu(
+                            expanded = showTimeMenu,
+                            onDismissRequest = { showTimeMenu = false }
+                        ) {
+                            TimeRangeFilter.values().forEach { filter ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            if (timeRangeFilter == filter) {
+                                                Icon(
+                                                    Icons.Default.Check,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(16.dp),
+                                                    tint = MaterialTheme.colorScheme.primary
+                                                )
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                            } else {
+                                                Spacer(modifier = Modifier.width(24.dp))
+                                            }
+                                            Text(
+                                                text = if (filter == TimeRangeFilter.DEFAULT) "${filter.displayName} (默认)" else filter.displayName,
+                                                fontWeight = if (timeRangeFilter == filter) FontWeight.Bold else FontWeight.Normal
+                                            )
+                                        }
+                                    },
+                                    onClick = {
+                                        viewModel.setTimeRangeFilter(filter)
+                                        showTimeMenu = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+
                     IconButton(onClick = { viewModel.toggleShowUnreadOnly() }) {
                         Icon(
                             imageVector = if (showUnreadOnly) Icons.Default.FilterAlt else Icons.Default.FilterAltOff,
