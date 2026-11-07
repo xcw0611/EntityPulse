@@ -16,13 +16,16 @@ import androidx.compose.ui.unit.dp
 import com.entitypulse.app.data.model.EntityCatalog
 import com.entitypulse.app.data.model.PlatformCandidateGroup
 import com.entitypulse.app.data.model.PredefinedChannel
-import com.entitypulse.app.network.OnlineEntityLocator
+import com.entitypulse.app.network.IpLocateResult
+import com.entitypulse.app.ui.MainViewModel
 import com.entitypulse.app.ui.screens.feed.PlatformBadge
 import com.entitypulse.app.ui.theme.VipGold
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @Composable
 fun AddEntityDialog(
+    viewModel: MainViewModel,
     onDismiss: () -> Unit,
     onConfirm: (
         name: String,
@@ -38,37 +41,49 @@ fun AddEntityDialog(
     var name by remember { mutableStateOf("") }
     var bio by remember { mutableStateOf("") }
     var avatarUrl by remember { mutableStateOf("") }
-    var category by remember { mutableStateOf("游戏 / 创作者") }
+    var category by remember { mutableStateOf("ACG / 游戏 / 创作者") }
     var isVip by remember { mutableStateOf(false) }
 
-    // 智能推断与多变体候选组列表
+    // 智能 IP 识别与跨平台账号结果
     var candidateGroups by remember { mutableStateOf<List<PlatformCandidateGroup>>(emptyList()) }
-    var isSearchingOnline by remember { mutableStateOf(false) }
-    var onlineDiscoveredCount by remember { mutableIntStateOf(0) }
+    var isLocatingIp by remember { mutableStateOf(false) }
+    var detectedIpResult by remember { mutableStateOf<IpLocateResult?>(null) }
 
-    // 当主体名称改变时，自动触发跨平台多变体规则生成 + 全网在线联想探测
+    // 当输入主体名称变化时，自动触发：1. 知识网络 IP 定位 (Bangumi/Steam/Wiki) -> 2. 全网针对性检索官方社媒
     LaunchedEffect(name) {
         val query = name.trim()
-        if (query.isNotBlank()) {
-            // 1. 规则引擎秒级生成初始多变体
-            candidateGroups = EntityCatalog.generateGroupedCandidates(query)
+        if (query.length >= 2) {
+            delay(400) // 防抖
+            isLocatingIp = true
 
-            // 2. 异步全网探测（DuckDuckGo / B站 / 维基等）
-            isSearchingOnline = true
-            onlineDiscoveredCount = 0
             coroutineScope.launch {
-                val additions = OnlineEntityLocator.searchOnlineCandidates(query)
-                isSearchingOnline = false
-                if (additions.isNotEmpty()) {
-                    onlineDiscoveredCount = additions.size
-                    // 重新以合并后的在线结果渲染候选组
-                    candidateGroups = EntityCatalog.generateGroupedCandidates(query, additions)
+                val res = viewModel.locateIpAndSocialChannels(query)
+                isLocatingIp = false
+                detectedIpResult = res
+
+                if (res.candidateGroups.isNotEmpty()) {
+                    candidateGroups = res.candidateGroups
+                } else if (candidateGroups.isEmpty()) {
+                    candidateGroups = EntityCatalog.generateGroupedCandidates(query)
+                }
+
+                // 智能自动填充探测到的资料，若用户未手动填写
+                if (bio.isBlank() && !res.bio.isNullOrBlank()) {
+                    bio = res.bio
+                }
+                if (avatarUrl.isBlank() && !res.avatarUrl.isNullOrBlank()) {
+                    avatarUrl = res.avatarUrl
+                }
+                if (category == "ACG / 游戏 / 创作者" || category.isBlank()) {
+                    category = res.category
                 }
             }
         } else {
-            candidateGroups = emptyList()
-            isSearchingOnline = false
-            onlineDiscoveredCount = 0
+            isLocatingIp = false
+            detectedIpResult = null
+            if (query.isBlank()) {
+                candidateGroups = emptyList()
+            }
         }
     }
 
@@ -79,13 +94,13 @@ fun AddEntityDialog(
         title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
-                    imageVector = Icons.Default.AutoAwesome,
+                    imageVector = Icons.Default.TravelExplore,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(24.dp)
                 )
                 Spacer(modifier = Modifier.width(8.dp))
-                Text(text = "添加关注主体", style = MaterialTheme.typography.titleLarge)
+                Text(text = "智能识别与添加主体", style = MaterialTheme.typography.titleLarge)
             }
         },
         text = {
@@ -96,7 +111,7 @@ fun AddEntityDialog(
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Text(
-                    text = "输入主体名称，系统将结合【智能全网定位】与【多变体账号候选】，为您推荐各社媒的最佳可能账户：",
+                    text = "输入动漫IP、游戏IP、工作室或作者名称，系统将通过知识网络自动锁定实体，并针对性全网检索官方账号：",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -126,15 +141,15 @@ fun AddEntityDialog(
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
-                    label = { Text("主体名称 (例如: Team Cherry / 游戏科学)") },
+                    label = { Text("IP 或主体名称 (如: 孤独摇滚 / 黑神话 / Team Cherry)") },
                     singleLine = true,
                     trailingIcon = {
-                        if (isSearchingOnline) {
+                        if (isLocatingIp) {
                             CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                        } else if (onlineDiscoveredCount > 0) {
+                        } else if (detectedIpResult != null) {
                             Icon(
                                 imageVector = Icons.Default.CheckCircle,
-                                contentDescription = "已探测",
+                                contentDescription = "已定位",
                                 tint = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.size(18.dp)
                             )
@@ -143,7 +158,42 @@ fun AddEntityDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                // --- 智能候选账号多平台分组确认面板 ---
+                // --- 成功定位到的 IP 详情卡片 ---
+                val ipRes = detectedIpResult
+                if (ipRes != null && ipRes.canonicalName.isNotBlank()) {
+                    Card(
+                        shape = RoundedCornerShape(10.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.AutoAwesome,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "已锁定实体: ${ipRes.canonicalName}" + (ipRes.originalOrEnglishName?.let { " ($it)" } ?: ""),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                            }
+                            Text(
+                                text = "分类: ${ipRes.category}" + (ipRes.officialSiteUrl?.let { " · 官网: $it" } ?: ""),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.outline
+                            )
+                        }
+                    }
+                }
+
+                // --- 针对该 IP 检索到的多平台账号面板 ---
                 if (candidateGroups.isNotEmpty()) {
                     Card(
                         shape = RoundedCornerShape(12.dp),
@@ -160,24 +210,17 @@ fun AddEntityDialog(
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text(
-                                        text = "匹配各平台账号 ($selectedCount/${candidateGroups.size})",
+                                        text = "全网检索到的账号 ($selectedCount/${candidateGroups.size})",
                                         style = MaterialTheme.typography.titleSmall,
                                         fontWeight = FontWeight.Bold,
                                         color = MaterialTheme.colorScheme.onSecondaryContainer
                                     )
-                                    if (isSearchingOnline) {
+                                    if (isLocatingIp) {
                                         Spacer(modifier = Modifier.width(6.dp))
                                         Text(
-                                            text = "全网探测中...",
+                                            text = "检索中...",
                                             style = MaterialTheme.typography.labelSmall,
                                             color = MaterialTheme.colorScheme.primary
-                                        )
-                                    } else if (onlineDiscoveredCount > 0) {
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text(
-                                            text = "已联想 $onlineDiscoveredCount 个变体",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.tertiary
                                         )
                                     }
                                 }
@@ -207,7 +250,7 @@ fun AddEntityDialog(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .padding(vertical = 4.dp)
-                                ) {
+                                    ) {
                                     Column(modifier = Modifier.padding(8.dp)) {
                                         // 平台主信息
                                         Row(
@@ -238,11 +281,11 @@ fun AddEntityDialog(
                                             }
                                         }
 
-                                        // 若存在多个备选可能账户（解决不同社媒命名差异），展示切换 Chips
+                                        // 若存在多个候选账号（例如官方推特 / PR推特 / 多语言分部），展示切换 Chips
                                         if (group.isEnabled && group.candidates.size > 1) {
                                             Spacer(modifier = Modifier.height(4.dp))
                                             Text(
-                                                text = "备选可能账户 (点击切换):",
+                                                text = "备选候选账号 (点击切换):",
                                                 style = MaterialTheme.typography.labelSmall,
                                                 color = MaterialTheme.colorScheme.primary,
                                                 modifier = Modifier.padding(start = 8.dp)
@@ -283,7 +326,7 @@ fun AddEntityDialog(
                 OutlinedTextField(
                     value = bio,
                     onValueChange = { bio = it },
-                    label = { Text("简介描述 (选填)") },
+                    label = { Text("简介描述 (自动回填，可微调)") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -291,7 +334,7 @@ fun AddEntityDialog(
                 OutlinedTextField(
                     value = avatarUrl,
                     onValueChange = { avatarUrl = it },
-                    label = { Text("头像图片 URL (选填)") },
+                    label = { Text("封面 / 头像图片 URL (已自动抓取)") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )

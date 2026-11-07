@@ -14,6 +14,9 @@ object TranslationManager {
 
     private val cache = ConcurrentHashMap<String, String>()
 
+    @Volatile
+    var customClient: OkHttpClient? = null
+
     private val defaultClient by lazy {
         OkHttpClient.Builder()
             .connectTimeout(8, TimeUnit.SECONDS)
@@ -41,7 +44,7 @@ object TranslationManager {
             return@withContext Result.success(cached)
         }
 
-        val httpClient = client ?: defaultClient
+        val httpClient = client ?: customClient ?: defaultClient
 
         // 1. 尝试 Google 翻译免登录接口
         try {

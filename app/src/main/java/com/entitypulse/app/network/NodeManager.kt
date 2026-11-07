@@ -61,8 +61,11 @@ class NodeManager(context: Context) {
         get() = prefs.getInt(PREF_DND_END_HOUR, 8)
         set(value) = prefs.edit().putInt(PREF_DND_END_HOUR, value).apply()
 
+    /**
+     * 默认开启代理模式以适配 Clash Meta 等代理工具，保障海外与跨平台请求一致性
+     */
     var isProxyEnabled: Boolean
-        get() = prefs.getBoolean(PREF_PROXY_ENABLED, false)
+        get() = prefs.getBoolean(PREF_PROXY_ENABLED, true)
         set(value) = prefs.edit().putBoolean(PREF_PROXY_ENABLED, value).apply()
 
     var proxyType: String
@@ -98,6 +101,40 @@ class NodeManager(context: Context) {
         }.getOrNull()
     }
 
+    /**
+     * 全应用统一 OkHttpClient 构建工厂，强制确保所有子模块（RSS抓取、社媒探测、翻译引擎、连通测试）统一穿透代理
+     */
+    fun getOkHttpClient(
+        connectTimeoutSec: Long = 10,
+        readTimeoutSec: Long = 15
+    ): OkHttpClient {
+        val builder = OkHttpClient.Builder()
+            .connectTimeout(connectTimeoutSec, TimeUnit.SECONDS)
+            .readTimeout(readTimeoutSec, TimeUnit.SECONDS)
+            .retryOnConnectionFailure(true)
+            .followRedirects(true)
+
+        val proxy = getProxy()
+        if (proxy != null) {
+            builder.proxy(proxy)
+        }
+        return builder.build()
+    }
+
+    fun applyClashLocalPreset() {
+        isProxyEnabled = true
+        proxyHost = "127.0.0.1"
+        proxyPort = 7890
+        proxyType = "HTTP"
+    }
+
+    fun applyEmulatorHostPreset() {
+        isProxyEnabled = true
+        proxyHost = "10.0.2.2"
+        proxyPort = 7890
+        proxyType = "HTTP"
+    }
+
     fun getActiveRssHubBaseUrl(): String {
         val custom = customNode.trimEnd('/')
         return if (custom.isNotBlank()) custom else PUBLIC_MIRRORS.first()
@@ -118,16 +155,8 @@ class NodeManager(context: Context) {
      */
     suspend fun testProxyConnectivity(): Pair<Boolean, String> = withContext(Dispatchers.IO) {
         val start = System.currentTimeMillis()
-        val builder = OkHttpClient.Builder()
-            .connectTimeout(6, TimeUnit.SECONDS)
-            .readTimeout(8, TimeUnit.SECONDS)
+        val client = getOkHttpClient(connectTimeoutSec = 6, readTimeoutSec = 8)
 
-        val proxy = getProxy()
-        if (isProxyEnabled && proxy != null) {
-            builder.proxy(proxy)
-        }
-
-        val client = builder.build()
         // 依次尝试 Google 204 与 Twitter
         val targets = listOf(
             "https://www.google.com/generate_204",
@@ -144,7 +173,7 @@ class NodeManager(context: Context) {
                 client.newCall(request).execute().use { response ->
                     val latency = System.currentTimeMillis() - start
                     if (response.isSuccessful || response.code == 204 || response.code == 429) {
-                        val proxyDesc = if (isProxyEnabled) "已通过 $proxyType 代理 ($proxyHost:$proxyPort)" else "直连环境"
+                        val proxyDesc = if (isProxyEnabled) "已成功经由 Clash Meta 代理 ($proxyHost:$proxyPort)" else "直连环境"
                         return@withContext true to "握手成功！延迟约 ${latency}ms ($proxyDesc)"
                     }
                 }
@@ -154,9 +183,9 @@ class NodeManager(context: Context) {
         }
 
         val errMsg = if (isProxyEnabled) {
-            "无法通过代理连接 ($proxyHost:$proxyPort)。请检查代理客户端是否已开启“允许局域网连接/监听全局”，并确认端口与协议 ($proxyType) 正确。"
+            "无法通过 Clash Meta 代理连接 ($proxyHost:$proxyPort)。若在手机端请确认 Clash Meta 已启动且处于运行状态；若通过电脑局域网代理请确保开启了“允许局域网连接 (Allow LAN)”。"
         } else {
-            "无法直连海外服务，建议开启并配置本地网络代理。"
+            "无法直连海外服务，请启用应用内置代理并连接 Clash Meta。"
         }
         false to errMsg
     }

@@ -256,7 +256,7 @@ fun SettingsScreen(viewModel: MainViewModel) {
             ) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(
-                        text = "若拉取 X/Twitter、YouTube 等海外动态时提示连接被重置 (Connection closed)，可开启本项将应用网络请求直通手机上运行的代理客户端（支持 HTTP / SOCKS5 协议，常见端口：Clash 7890/7897，V2Ray 10808/10809）：",
+                        text = "已启用统一网络代理调度：应用内所有网络请求（X/Twitter、YouTube、Steam、Reddit、知识网络 IP 检索与双引擎翻译）均统一经由此代理端口安全分流，彻底杜绝对端连接中断 (Connection closed)。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -266,7 +266,7 @@ fun SettingsScreen(viewModel: MainViewModel) {
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("启用应用网络代理", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                        Text("统一网络代理", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
                         Switch(
                             checked = proxyEnabled,
                             onCheckedChange = {
@@ -277,6 +277,34 @@ fun SettingsScreen(viewModel: MainViewModel) {
                     }
 
                     if (proxyEnabled) {
+                        // Clash Meta 快捷预设按钮
+                        Text("一键应用常用代理预设:", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            SuggestionChip(
+                                onClick = {
+                                    proxyHost = "127.0.0.1"
+                                    proxyPort = 7890
+                                    proxyType = "HTTP"
+                                    viewModel.updateProxySettings(true, "127.0.0.1", 7890, "HTTP")
+                                },
+                                label = { Text("本机 Clash Meta (127.0.0.1:7890)") }
+                            )
+                            SuggestionChip(
+                                onClick = {
+                                    proxyHost = "10.0.2.2"
+                                    proxyPort = 7890
+                                    proxyType = "HTTP"
+                                    viewModel.updateProxySettings(true, "10.0.2.2", 7890, "HTTP")
+                                },
+                                label = { Text("安卓模拟器宿主 (10.0.2.2:7890)") }
+                            )
+                        }
+
                         // 代理协议选择
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -289,7 +317,7 @@ fun SettingsScreen(viewModel: MainViewModel) {
                                     proxyType = "HTTP"
                                     viewModel.updateProxySettings(proxyEnabled, proxyHost, proxyPort, "HTTP")
                                 },
-                                label = { Text("HTTP") }
+                                label = { Text("HTTP (推荐)") }
                             )
                             FilterChip(
                                 selected = proxyType == "SOCKS5" || proxyType == "SOCKS",
@@ -311,7 +339,7 @@ fun SettingsScreen(viewModel: MainViewModel) {
                                     proxyHost = it
                                     viewModel.updateProxySettings(proxyEnabled, it, proxyPort, proxyType)
                                 },
-                                label = { Text("代理 IP") },
+                                label = { Text("代理主机/IP") },
                                 singleLine = true,
                                 modifier = Modifier.weight(2f)
                             )

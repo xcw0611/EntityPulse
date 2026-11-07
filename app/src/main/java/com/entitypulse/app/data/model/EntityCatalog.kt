@@ -279,102 +279,64 @@ object EntityCatalog {
             return groups
         }
 
-        // 2. 自定义输入：智能衍生跨平台多候选方案
+        // 2. 自定义输入：若有在线检索结果则优先使用真实账号，否则生成基础标准账号
         if (clean.isBlank()) return emptyList()
 
         val groups = mutableListOf<PlatformCandidateGroup>()
 
         // (1) X / Twitter 候选组
-        val twitterCandidates = mutableListOf(
-            PredefinedChannel(PlatformType.TWITTER, "@$clean", "X / Twitter (@$clean)", "/twitter/user/$clean", true, "标准账号"),
-            PredefinedChannel(PlatformType.TWITTER, "@${clean}Games", "X / Twitter (@${clean}Games)", "/twitter/user/${clean}Games", false, "游戏专用"),
-            PredefinedChannel(PlatformType.TWITTER, "@${clean}Official", "X / Twitter (@${clean}Official)", "/twitter/user/${clean}Official", false, "官方后缀"),
-            PredefinedChannel(PlatformType.TWITTER, "@${clean}Studio", "X / Twitter (@${clean}Studio)", "/twitter/user/${clean}Studio", false, "工作室"),
-            PredefinedChannel(PlatformType.TWITTER, "@${clean}_CN", "X / Twitter (@${clean}_CN)", "/twitter/user/${clean}_CN", false, "中文区")
-        )
-        onlineAdditions.filter { it.platformType == PlatformType.TWITTER }.forEach { onl ->
-            if (twitterCandidates.none { it.identifier.equals(onl.identifier, ignoreCase = true) }) {
-                twitterCandidates.add(onl)
-            }
+        val twitterCandidates = mutableListOf<PredefinedChannel>()
+        val twOnline = onlineAdditions.filter { it.platformType == PlatformType.TWITTER }
+        if (twOnline.isNotEmpty()) {
+            twitterCandidates.addAll(twOnline)
+        } else {
+            twitterCandidates.add(
+                PredefinedChannel(PlatformType.TWITTER, "@$clean", "X / Twitter (@$clean)", "/twitter/user/$clean", true, "标准账号")
+            )
         }
         groups.add(PlatformCandidateGroup(PlatformType.TWITTER, twitterCandidates, 0, true))
 
-        // (2) YouTube 候选组
-        val ytCandidates = mutableListOf(
-            PredefinedChannel(PlatformType.YOUTUBE, "@$clean", "YouTube (@$clean)", "/youtube/user/@$clean", true, "标准频道"),
-            PredefinedChannel(PlatformType.YOUTUBE, "@${clean}Official", "YouTube (@${clean}Official)", "/youtube/user/@${clean}Official", false, "官方认证"),
-            PredefinedChannel(PlatformType.YOUTUBE, "@${clean}Games", "YouTube (@${clean}Games)", "/youtube/user/@${clean}Games", false, "游戏频道")
-        )
-        onlineAdditions.filter { it.platformType == PlatformType.YOUTUBE }.forEach { onl ->
-            if (ytCandidates.none { it.identifier.equals(onl.identifier, ignoreCase = true) }) {
-                ytCandidates.add(onl)
-            }
+        // (2) Bilibili 候选组
+        val biliCandidates = mutableListOf<PredefinedChannel>()
+        val biliOnline = onlineAdditions.filter { it.platformType == PlatformType.BILIBILI }
+        if (biliOnline.isNotEmpty()) {
+            biliCandidates.addAll(biliOnline)
+        } else {
+            biliCandidates.add(
+                PredefinedChannel(PlatformType.BILIBILI, trimmed, "Bilibili ($trimmed)", "/bilibili/user/video/$trimmed", true, "原名检索")
+            )
+        }
+        groups.add(PlatformCandidateGroup(PlatformType.BILIBILI, biliCandidates, 0, true))
+
+        // (3) YouTube 候选组
+        val ytCandidates = mutableListOf<PredefinedChannel>()
+        val ytOnline = onlineAdditions.filter { it.platformType == PlatformType.YOUTUBE }
+        if (ytOnline.isNotEmpty()) {
+            ytCandidates.addAll(ytOnline)
+        } else {
+            ytCandidates.add(
+                PredefinedChannel(PlatformType.YOUTUBE, "@$clean", "YouTube (@$clean)", "/youtube/user/@$clean", false, "标准频道")
+            )
         }
         groups.add(PlatformCandidateGroup(PlatformType.YOUTUBE, ytCandidates, 0, true))
 
-        // (3) Bilibili 候选组
-        val biliCandidates = mutableListOf(
-            PredefinedChannel(PlatformType.BILIBILI, trimmed, "Bilibili ($trimmed)", "/bilibili/user/video/$trimmed", false, "原名检索"),
-            PredefinedChannel(PlatformType.BILIBILI, "${trimmed}官方", "Bilibili (${trimmed}官方)", "/bilibili/user/video/${trimmed}官方", false, "官方账号"),
-            PredefinedChannel(PlatformType.BILIBILI, "${trimmed}工作室", "Bilibili (${trimmed}工作室)", "/bilibili/user/video/${trimmed}工作室", false, "团队账号")
-        )
-        onlineAdditions.filter { it.platformType == PlatformType.BILIBILI }.forEach { onl ->
-            if (biliCandidates.none { it.identifier.equals(onl.identifier, ignoreCase = true) }) {
-                biliCandidates.add(onl)
-            }
+        // (4) Steam 候选组 (仅当有检测到 Steam 项目时默认呈现)
+        val steamOnline = onlineAdditions.filter { it.platformType == PlatformType.STEAM }
+        if (steamOnline.isNotEmpty()) {
+            groups.add(PlatformCandidateGroup(PlatformType.STEAM, steamOnline, 0, true))
         }
-        groups.add(PlatformCandidateGroup(PlatformType.BILIBILI, biliCandidates, 0, false))
 
-        // (4) Steam 候选组
-        groups.add(
-            PlatformCandidateGroup(
-                PlatformType.STEAM,
-                listOf(
-                    PredefinedChannel(PlatformType.STEAM, trimmed, "Steam · $trimmed 官方公告", "https://steamcommunity.com/search/groups/?text=$clean", false, "公告源")
-                ),
-                0,
-                false
-            )
-        )
+        // (5) 官网直链 (若在线检索探测到了官网)
+        val siteOnline = onlineAdditions.filter { it.platformType == PlatformType.RSS_CUSTOM }
+        if (siteOnline.isNotEmpty()) {
+            groups.add(PlatformCandidateGroup(PlatformType.RSS_CUSTOM, siteOnline, 0, true))
+        }
 
-        // (5) Reddit 候选组
-        groups.add(
-            PlatformCandidateGroup(
-                PlatformType.REDDIT,
-                listOf(
-                    PredefinedChannel(PlatformType.REDDIT, "r/$clean", "Reddit (r/$clean)", "https://www.reddit.com/r/$clean/.rss", false, "社区主版"),
-                    PredefinedChannel(PlatformType.REDDIT, "r/${clean}Game", "Reddit (r/${clean}Game)", "https://www.reddit.com/r/${clean}Game/.rss", false, "游戏专版")
-                ),
-                0,
-                false
-            )
-        )
-
-        // (6) Bluesky 候选组
-        groups.add(
-            PlatformCandidateGroup(
-                PlatformType.BLUESKY,
-                listOf(
-                    PredefinedChannel(PlatformType.BLUESKY, "$clean.bsky.social", "Bluesky ($clean.bsky.social)", "/bluesky/profile/$clean.bsky.social", false, "主域名"),
-                    PredefinedChannel(PlatformType.BLUESKY, "${clean}official.bsky.social", "Bluesky (${clean}official.bsky.social)", "/bluesky/profile/${clean}official.bsky.social", false, "官方后缀")
-                ),
-                0,
-                false
-            )
-        )
-
-        // (7) GitHub 候选组
-        groups.add(
-            PlatformCandidateGroup(
-                PlatformType.GITHUB,
-                listOf(
-                    PredefinedChannel(PlatformType.GITHUB, clean, "GitHub ($clean)", "https://github.com/$clean.atom", false, "主仓库动态"),
-                    PredefinedChannel(PlatformType.GITHUB, "$clean-org", "GitHub ($clean-org)", "https://github.com/$clean-org.atom", false, "组织动态")
-                ),
-                0,
-                false
-            )
-        )
+        // (6) Reddit 候选组
+        val redditOnline = onlineAdditions.filter { it.platformType == PlatformType.REDDIT }
+        if (redditOnline.isNotEmpty()) {
+            groups.add(PlatformCandidateGroup(PlatformType.REDDIT, redditOnline, 0, false))
+        }
 
         return groups
     }

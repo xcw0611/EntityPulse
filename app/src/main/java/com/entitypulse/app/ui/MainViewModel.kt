@@ -7,10 +7,7 @@ import androidx.lifecycle.viewModelScope
 import com.entitypulse.app.backup.BackupManager
 import com.entitypulse.app.data.AppDatabase
 import com.entitypulse.app.data.model.*
-import com.entitypulse.app.network.NodeManager
-import com.entitypulse.app.network.ParsedFeedItem
-import com.entitypulse.app.network.PlatformResolver
-import com.entitypulse.app.network.ResolvedPlatform
+import com.entitypulse.app.network.*
 import com.entitypulse.app.notification.NotificationHelper
 import com.entitypulse.app.repository.FeedRepository
 import com.entitypulse.app.sync.SyncWorker
@@ -25,6 +22,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val repository = FeedRepository(database, nodeManager)
     val backupManager = BackupManager(application, database)
     private val notificationHelper = NotificationHelper(application)
+
+    init {
+        TranslationManager.customClient = nodeManager.getOkHttpClient()
+    }
 
     // 主体列表与统计流
     val entities: StateFlow<List<EntityWithUnreadCount>> = repository.observeEntitiesWithStats()
@@ -171,8 +172,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         nodeManager.proxyHost = host
         nodeManager.proxyPort = port
         nodeManager.proxyType = type
+        TranslationManager.customClient = nodeManager.getOkHttpClient()
         viewModelScope.launch {
-            _userMessage.emit(if (enabled) "已开启应用代理: $type $host:$port" else "已停用应用代理")
+            _userMessage.emit(if (enabled) "已开启统一代理: $type $host:$port" else "已停用应用代理")
+        }
+    }
+
+    suspend fun locateIpAndSocialChannels(query: String): IpLocateResult {
+        return OnlineEntityLocator.locateIpAndSocialChannels(query, nodeManager.getOkHttpClient())
+    }
+
+    suspend fun testCandidateChannel(channel: PredefinedChannel): Result<ParsedFeedItem> {
+        return runCatching {
+            repository.testChannel(channel.feedPathOrUrl)
         }
     }
 

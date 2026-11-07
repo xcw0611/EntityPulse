@@ -26,17 +26,7 @@ class FeedRepository(
     private val feedDao = database.feedDao()
 
     private fun getHttpClient(): OkHttpClient {
-        val builder = OkHttpClient.Builder()
-            .connectTimeout(12, TimeUnit.SECONDS)
-            .readTimeout(18, TimeUnit.SECONDS)
-            .retryOnConnectionFailure(true)
-            .followRedirects(true)
-
-        val proxy = nodeManager.getProxy()
-        if (proxy != null) {
-            builder.proxy(proxy)
-        }
-        return builder.build()
+        return nodeManager.getOkHttpClient(connectTimeoutSec = 12, readTimeoutSec = 18)
     }
 
     // --- Entity Operations ---
