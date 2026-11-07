@@ -127,7 +127,7 @@ object OnlineEntityLocator {
                 return list
             }
         }
-        return emptyList
+        return emptyList()
     }
 
     private fun fetchBilibiliSuggestions(query: String, client: OkHttpClient): List<String> {
@@ -154,5 +154,6 @@ object OnlineEntityLocator {
             }
             return list
         }
+        return emptyList()
     }
 }

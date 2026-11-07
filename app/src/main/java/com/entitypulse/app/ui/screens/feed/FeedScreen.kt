@@ -76,7 +76,7 @@ fun FeedScreen(
                             expanded = showTimeMenu,
                             onDismissRequest = { showTimeMenu = false }
                         ) {
-                            TimeRangeFilter.values().forEach { filter ->
+                            TimeRangeFilter.entries.forEach { filter ->
                                 DropdownMenuItem(
                                     text = {
                                         Row(verticalAlignment = Alignment.CenterVertically) {

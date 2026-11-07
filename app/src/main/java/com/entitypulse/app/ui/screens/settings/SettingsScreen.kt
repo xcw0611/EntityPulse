@@ -164,7 +164,7 @@ fun SettingsScreen(viewModel: MainViewModel) {
                                 .horizontalScroll(rememberScrollState()),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            TimeRangeFilter.values().forEach { filter ->
+                            TimeRangeFilter.entries.forEach { filter ->
                                 FilterChip(
                                     selected = defaultTimeRange == filter,
                                     onClick = {
