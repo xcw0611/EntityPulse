@@ -4,8 +4,10 @@ import com.entitypulse.app.data.AppDatabase
 import com.entitypulse.app.data.model.*
 import com.entitypulse.app.network.FeedParser
 import com.entitypulse.app.network.NodeManager
+import com.entitypulse.app.network.ParsedFeed
 import com.entitypulse.app.network.ParsedFeedItem
 import com.entitypulse.app.network.PlatformResolver
+import com.entitypulse.app.network.TwitterSyndicationParser
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
@@ -154,8 +156,7 @@ class FeedRepository(
      * 测试指定的订阅源，返回抓取到的最新一条动态预览，若失败则抛出包含诊断建议的异常。
      */
     suspend fun testChannel(feedPathOrUrl: String): ParsedFeedItem = withContext(Dispatchers.IO) {
-        val xml = fetchFeedXml(feedPathOrUrl)
-        val parsed = FeedParser.parse(xml)
+        val parsed = fetchFeed(feedPathOrUrl)
         if (parsed.items.isEmpty()) {
             throw IllegalStateException("连接成功，但该频道近期未发布任何公开动态")
         }
@@ -168,8 +169,7 @@ class FeedRepository(
     suspend fun syncChannel(channel: SourceChannelRecord): List<FeedItemRecord> = withContext(Dispatchers.IO) {
         val newSavedItems = mutableListOf<FeedItemRecord>()
         try {
-            val xml = fetchFeedXml(channel.resolvedFeedUrl)
-            val parsedFeed = FeedParser.parse(xml)
+            val parsedFeed = fetchFeed(channel.resolvedFeedUrl)
 
             for (item in parsedFeed.items) {
                 val mediaJson = if (item.mediaUrls.isNotEmpty()) {
@@ -219,23 +219,40 @@ class FeedRepository(
         results
     }
 
-    private suspend fun fetchFeedXml(feedPathOrUrl: String): String = withContext(Dispatchers.IO) {
+    private suspend fun fetchFeed(feedPathOrUrl: String): ParsedFeed = withContext(Dispatchers.IO) {
+        // 1. 若为 Twitter / X，优先调用官方 Syndication 接口免登录抓取
+        val isTwitter = feedPathOrUrl.startsWith("/twitter/user/", ignoreCase = true) ||
+                feedPathOrUrl.contains("twitter.com", ignoreCase = true) ||
+                feedPathOrUrl.contains("x.com", ignoreCase = true)
+
+        if (isTwitter) {
+            val username = extractTwitterUsername(feedPathOrUrl)
+            if (username.isNotBlank()) {
+                try {
+                    return@withContext TwitterSyndicationParser.fetchTimeline(username, getHttpClient())
+                } catch (e: Exception) {
+                    // 若官方 Syndication 失败（如频控限制），继续向下尝试配置的 RSSHub 节点池
+                }
+            }
+        }
+
+        // 2. 传统 RSS/Atom 直连抓取或通过 RSSHub 镜像池
         val isDirectUrl = feedPathOrUrl.startsWith("http://", ignoreCase = true) ||
                 feedPathOrUrl.startsWith("https://", ignoreCase = true)
 
         if (isDirectUrl) {
             try {
-                return@withContext executeRequest(feedPathOrUrl)
+                val xml = executeRequest(feedPathOrUrl)
+                return@withContext FeedParser.parse(xml)
             } catch (e: Exception) {
                 throw diagnoseNetworkError(e, feedPathOrUrl)
             }
         }
 
-        // 路径为社媒路由（如 /twitter/user/...）
+        // 路径为社媒路由（如 /bilibili/user/... 或备用 /twitter/...）
         val candidateNodes = nodeManager.getAllCandidateNodes()
         var lastError: Exception? = null
 
-        // 1. 尝试配置的所有 RSSHub 节点池
         for (node in candidateNodes) {
             val fullUrl = PlatformResolver.buildFinalUrl(
                 feedPathOrUrl = feedPathOrUrl,
@@ -243,30 +260,26 @@ class FeedRepository(
                 token = nodeManager.accessToken.ifBlank { null }
             )
             try {
-                return@withContext executeRequest(fullUrl)
+                val xml = executeRequest(fullUrl)
+                return@withContext FeedParser.parse(xml)
             } catch (e: Exception) {
                 lastError = e
             }
         }
 
-        // 2. 若为 X / Twitter 且 RSSHub 均无法连接，尝试备用 Nitter 镜像池
-        if (feedPathOrUrl.startsWith("/twitter/user/", ignoreCase = true)) {
-            val username = feedPathOrUrl.removePrefix("/twitter/user/").trim()
-            val nitterMirrors = listOf(
-                "https://nitter.privacydev.net/$username/rss",
-                "https://xcancel.com/$username/rss",
-                "https://nitter.poast.org/$username/rss"
-            )
-            for (mirror in nitterMirrors) {
-                try {
-                    return@withContext executeRequest(mirror)
-                } catch (e: Exception) {
-                    lastError = e
-                }
-            }
-        }
+        throw diagnoseNetworkError(lastError ?: IllegalStateException("无法连通任何数据节点"), feedPathOrUrl)
+    }
 
-        throw diagnoseNetworkError(lastError ?: IllegalStateException("无法连通节点"), feedPathOrUrl)
+    private fun extractTwitterUsername(pathOrUrl: String): String {
+        val trimmed = pathOrUrl.trim()
+        if (trimmed.startsWith("/twitter/user/", ignoreCase = true)) {
+            return trimmed.removePrefix("/twitter/user/").substringBefore('/').substringBefore('?').trim()
+        }
+        if (trimmed.contains("twitter.com/") || trimmed.contains("x.com/")) {
+            val after = if (trimmed.contains("x.com/")) trimmed.substringAfter("x.com/") else trimmed.substringAfter("twitter.com/")
+            return after.substringBefore('/').substringBefore('?').removePrefix("@").trim()
+        }
+        return ""
     }
 
     private fun executeRequest(url: String): String {
@@ -296,7 +309,9 @@ class FeedRepository(
         val isTimeout = msg.contains("timeout", ignoreCase = true) || msg.contains("timed out", ignoreCase = true)
 
         val friendlyReason = when {
-            isConnectionClosed -> "连接被对端中断或重置 (Connection closed)。若正在访问 X/Twitter、YouTube 等海外站点，通常由于国内直连受限，请在【设置】中配置本地代理端口 (如 127.0.0.1:7890) 或开启网络加速后重试。"
+            target.contains("twitter", ignoreCase = true) || target.contains("x.com", ignoreCase = true) ->
+                "X (Twitter) 数据连接失败 ($msg)。Twitter 访问需要海外网络，请在【设置】中配置本地代理端口（如 Clash: 7890/7897，V2Ray: 10808）并点击【测试网络连通性】。"
+            isConnectionClosed -> "连接被对端中断或重置 (Connection closed)。若正在访问海外站点，通常由于国内直连受限，请在【设置】中配置本地代理端口 (如 127.0.0.1:7890/7897) 或开启网络加速后重试。"
             isTimeout -> "请求超时。目标服务器响应过慢，请检查网络环境或在【设置】中切换自建 RSSHub 节点。"
             msg.contains("403") || msg.contains("404") -> "目标源受限或不存在 ($msg)。建议在【设置】中配置具备鉴权 Token 的自建 RSSHub 实例。"
             else -> "网络连接失败: $msg"

@@ -21,9 +21,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.entitypulse.app.data.model.FeedItemWithMeta
+import com.entitypulse.app.network.TranslationManager
 import com.entitypulse.app.ui.MainViewModel
 import com.entitypulse.app.ui.screens.feed.PlatformBadge
 import com.entitypulse.app.ui.theme.VipGold
+import kotlinx.coroutines.launch
 import org.json.JSONArray
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -37,7 +39,13 @@ fun PostDetailScreen(
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
     var itemWithMeta by remember { mutableStateOf<FeedItemWithMeta?>(null) }
+
+    var isTranslated by remember { mutableStateOf(false) }
+    var isTranslating by remember { mutableStateOf(false) }
+    var translatedText by remember { mutableStateOf<String?>(null) }
+    var translationError by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(postId) {
         itemWithMeta = viewModel.repository.getFeedItemWithMeta(postId)
@@ -83,7 +91,7 @@ fun PostDetailScreen(
             )
         },
         bottomBar = {
-            if (item != null && item.item.originalUrl.isNotBlank()) {
+            if (item != null) {
                 Surface(
                     tonalElevation = 4.dp,
                     shadowElevation = 8.dp
@@ -95,18 +103,57 @@ fun PostDetailScreen(
                             .padding(16.dp),
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        Button(
+                        OutlinedButton(
                             onClick = {
-                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(item.item.originalUrl)).apply {
-                                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                                if (isTranslated) {
+                                    isTranslated = false
+                                } else if (translatedText != null) {
+                                    isTranslated = true
+                                } else {
+                                    isTranslating = true
+                                    translationError = null
+                                    coroutineScope.launch {
+                                        val res = TranslationManager.translate(
+                                            text = item.item.contentPlainText.ifBlank { item.item.title }
+                                        )
+                                        isTranslating = false
+                                        res.onSuccess {
+                                            translatedText = it
+                                            isTranslated = true
+                                        }.onFailure { e ->
+                                            translationError = e.localizedMessage ?: "翻译失败"
+                                        }
+                                    }
                                 }
-                                context.startActivity(intent)
                             },
+                            enabled = !isTranslating,
                             modifier = Modifier.weight(1f)
                         ) {
-                            Icon(Icons.Default.OpenInNew, contentDescription = null)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("在官方 App / 原网页中查看")
+                            if (isTranslating) {
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("翻译中...")
+                            } else {
+                                Icon(Icons.Default.Translate, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(if (isTranslated) "查看原文" else "一键翻译")
+                            }
+                        }
+
+                        if (item.item.originalUrl.isNotBlank()) {
+                            Button(
+                                onClick = {
+                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(item.item.originalUrl)).apply {
+                                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                                    }
+                                    context.startActivity(intent)
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Default.OpenInNew, contentDescription = null)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("原网查看")
+                            }
                         }
                     }
                 }
@@ -226,11 +273,53 @@ fun PostDetailScreen(
                 Spacer(modifier = Modifier.height(16.dp))
 
                 // 正文内容
-                Text(
-                    text = feed.contentPlainText,
-                    style = MaterialTheme.typography.bodyLarge,
-                    lineHeight = MaterialTheme.typography.bodyLarge.lineHeight * 1.3f
-                )
+                if (isTranslated && !translatedText.isNullOrBlank()) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 12.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Default.Translate,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp),
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "由智能双引擎翻译（已译为简体中文）",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                        }
+                    }
+                    Text(
+                        text = translatedText ?: "",
+                        style = MaterialTheme.typography.bodyLarge,
+                        lineHeight = MaterialTheme.typography.bodyLarge.lineHeight * 1.3f
+                    )
+                } else {
+                    Text(
+                        text = feed.contentPlainText,
+                        style = MaterialTheme.typography.bodyLarge,
+                        lineHeight = MaterialTheme.typography.bodyLarge.lineHeight * 1.3f
+                    )
+                }
+
+                if (translationError != null) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "翻译提示: $translationError",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
 
                 // 媒体图片展示
                 if (mediaUrls.isNotEmpty()) {

@@ -52,12 +52,6 @@ object EntityCatalog {
                     feedPathOrUrl = "/youtube/user/@TeamCherry"
                 ),
                 PredefinedChannel(
-                    platformType = PlatformType.REDDIT,
-                    identifier = "r/HollowKnight",
-                    title = "Reddit (r/HollowKnight)",
-                    feedPathOrUrl = "https://www.reddit.com/r/HollowKnight/.rss"
-                ),
-                PredefinedChannel(
                     platformType = PlatformType.RSS_CUSTOM,
                     identifier = "teamcherry.com.au",
                     title = "官方开发博客 (teamcherry.com.au)",

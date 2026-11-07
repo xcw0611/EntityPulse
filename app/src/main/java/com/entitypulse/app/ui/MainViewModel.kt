@@ -143,12 +143,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun updateProxySettings(enabled: Boolean, host: String, port: Int) {
+    fun updateProxySettings(enabled: Boolean, host: String, port: Int, type: String = "HTTP") {
         nodeManager.isProxyEnabled = enabled
         nodeManager.proxyHost = host
         nodeManager.proxyPort = port
+        nodeManager.proxyType = type
         viewModelScope.launch {
-            _userMessage.emit(if (enabled) "已开启应用代理: $host:$port" else "已停用应用代理")
+            _userMessage.emit(if (enabled) "已开启应用代理: $type $host:$port" else "已停用应用代理")
+        }
+    }
+
+    fun testProxyConnection(onResult: (Boolean, String) -> Unit) {
+        viewModelScope.launch {
+            val res = nodeManager.testProxyConnectivity()
+            onResult(res.first, res.second)
         }
     }
 

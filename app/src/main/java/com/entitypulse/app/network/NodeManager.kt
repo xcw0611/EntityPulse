@@ -2,8 +2,13 @@ package com.entitypulse.app.network
 
 import android.content.Context
 import android.content.SharedPreferences
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import java.net.InetSocketAddress
 import java.net.Proxy
+import java.util.concurrent.TimeUnit
 
 class NodeManager(context: Context) {
 
@@ -19,6 +24,7 @@ class NodeManager(context: Context) {
         const val PREF_DND_END_HOUR = "pref_dnd_end_hour"
 
         const val PREF_PROXY_ENABLED = "pref_proxy_enabled"
+        const val PREF_PROXY_TYPE = "pref_proxy_type"
         const val PREF_PROXY_HOST = "pref_proxy_host"
         const val PREF_PROXY_PORT = "pref_proxy_port"
 
@@ -58,6 +64,10 @@ class NodeManager(context: Context) {
         get() = prefs.getBoolean(PREF_PROXY_ENABLED, false)
         set(value) = prefs.edit().putBoolean(PREF_PROXY_ENABLED, value).apply()
 
+    var proxyType: String
+        get() = prefs.getString(PREF_PROXY_TYPE, "HTTP") ?: "HTTP"
+        set(value) = prefs.edit().putString(PREF_PROXY_TYPE, value.trim().uppercase()).apply()
+
     var proxyHost: String
         get() = prefs.getString(PREF_PROXY_HOST, "127.0.0.1") ?: "127.0.0.1"
         set(value) = prefs.edit().putString(PREF_PROXY_HOST, value.trim()).apply()
@@ -69,7 +79,12 @@ class NodeManager(context: Context) {
     fun getProxy(): Proxy? {
         if (!isProxyEnabled) return null
         return runCatching {
-            Proxy(Proxy.Type.HTTP, InetSocketAddress(proxyHost.trim(), proxyPort))
+            val type = if (proxyType.equals("SOCKS", ignoreCase = true) || proxyType.equals("SOCKS5", ignoreCase = true)) {
+                Proxy.Type.SOCKS
+            } else {
+                Proxy.Type.HTTP
+            }
+            Proxy(type, InetSocketAddress(proxyHost.trim(), proxyPort))
         }.getOrNull()
     }
 
@@ -86,5 +101,53 @@ class NodeManager(context: Context) {
         }
         list.addAll(PUBLIC_MIRRORS)
         return list.distinct()
+    }
+
+    /**
+     * 测试当前配置的代理与海外网络连通性，并返回延迟与诊断信息
+     */
+    suspend fun testProxyConnectivity(): Pair<Boolean, String> = withContext(Dispatchers.IO) {
+        val start = System.currentTimeMillis()
+        val builder = OkHttpClient.Builder()
+            .connectTimeout(6, TimeUnit.SECONDS)
+            .readTimeout(8, TimeUnit.SECONDS)
+
+        val proxy = getProxy()
+        if (isProxyEnabled && proxy != null) {
+            builder.proxy(proxy)
+        }
+
+        val client = builder.build()
+        // 依次尝试 Google 204 与 Twitter
+        val targets = listOf(
+            "https://www.google.com/generate_204",
+            "https://syndication.twitter.com"
+        )
+
+        for (url in targets) {
+            try {
+                val request = Request.Builder()
+                    .url(url)
+                    .header("User-Agent", "Mozilla/5.0")
+                    .build()
+
+                client.newCall(request).execute().use { response ->
+                    val latency = System.currentTimeMillis() - start
+                    if (response.isSuccessful || response.code == 204 || response.code == 429) {
+                        val proxyDesc = if (isProxyEnabled) "已通过 $proxyType 代理 ($proxyHost:$proxyPort)" else "直连环境"
+                        return@withContext true to "握手成功！延迟约 ${latency}ms ($proxyDesc)"
+                    }
+                }
+            } catch (e: Exception) {
+                // 继续尝试下一个测试点
+            }
+        }
+
+        val errMsg = if (isProxyEnabled) {
+            "无法通过代理连接 ($proxyHost:$proxyPort)。请检查代理客户端是否已开启“允许局域网连接/监听全局”，并确认端口与协议 ($proxyType) 正确。"
+        } else {
+            "无法直连海外服务，建议开启并配置本地网络代理。"
+        }
+        false to errMsg
     }
 }

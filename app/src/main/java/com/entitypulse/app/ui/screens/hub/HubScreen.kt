@@ -319,6 +319,7 @@ fun EmptyHubView(onAddClick: () -> Unit) {
 }
 
 fun formatRelativeTime(timestamp: Long): String {
+    if (timestamp <= 0L) return ""
     val diff = System.currentTimeMillis() - timestamp
     val seconds = diff / 1000
     val minutes = seconds / 60
@@ -326,10 +327,11 @@ fun formatRelativeTime(timestamp: Long): String {
     val days = hours / 24
 
     return when {
+        diff < 0 -> SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(timestamp))
         minutes < 1 -> "刚刚"
         minutes < 60 -> "${minutes}分钟前"
         hours < 24 -> "${hours}小时前"
         days < 7 -> "${days}天前"
-        else -> SimpleDateFormat("MM-dd", Locale.getDefault()).format(Date(timestamp))
+        else -> SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(timestamp))
     }
 }

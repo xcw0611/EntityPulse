@@ -26,9 +26,11 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.entitypulse.app.data.model.FeedItemWithMeta
 import com.entitypulse.app.data.model.PlatformType
+import com.entitypulse.app.network.TranslationManager
 import com.entitypulse.app.ui.MainViewModel
 import com.entitypulse.app.ui.screens.hub.formatRelativeTime
 import com.entitypulse.app.ui.theme.*
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -177,7 +179,12 @@ fun FeedItemCard(
     onToggleBookmark: () -> Unit
 ) {
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
     val feed = item.item
+
+    var isTranslated by remember { mutableStateOf(false) }
+    var isTranslating by remember { mutableStateOf(false) }
+    var translatedSnippet by remember { mutableStateOf<String?>(null) }
 
     Card(
         shape = RoundedCornerShape(14.dp),
@@ -268,15 +275,31 @@ fun FeedItemCard(
             )
 
             // 正文纯文本预览
-            if (feed.contentPlainText.isNotBlank() && feed.contentPlainText != feed.title) {
+            val displayText = if (isTranslated && !translatedSnippet.isNullOrBlank()) {
+                translatedSnippet ?: ""
+            } else {
+                feed.contentPlainText
+            }
+
+            if (displayText.isNotBlank() && (displayText != feed.title || isTranslated)) {
                 Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = feed.contentPlainText,
-                    style = MaterialTheme.typography.bodySmall,
-                    maxLines = 3,
-                    overflow = TextOverflow.Ellipsis,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                if (isTranslated) {
+                    Text(
+                        text = "[译] $displayText",
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 4,
+                        overflow = TextOverflow.Ellipsis,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                } else {
+                    Text(
+                        text = displayText,
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
 
             // 缩略图
@@ -322,6 +345,44 @@ fun FeedItemCard(
                 }
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    // 一键翻译
+                    IconButton(
+                        onClick = {
+                            if (isTranslated) {
+                                isTranslated = false
+                            } else if (translatedSnippet != null) {
+                                isTranslated = true
+                            } else {
+                                isTranslating = true
+                                coroutineScope.launch {
+                                    val textToTranslate = if (feed.contentPlainText.isNotBlank()) {
+                                        feed.contentPlainText
+                                    } else {
+                                        feed.title
+                                    }
+                                    val res = TranslationManager.translate(textToTranslate)
+                                    isTranslating = false
+                                    res.onSuccess {
+                                        translatedSnippet = it
+                                        isTranslated = true
+                                    }
+                                }
+                            }
+                        },
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        if (isTranslating) {
+                            CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.Translate,
+                                contentDescription = "一键翻译",
+                                tint = if (isTranslated) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+
                     // 分享
                     IconButton(
                         onClick = {

@@ -32,8 +32,12 @@ fun SettingsScreen(viewModel: MainViewModel) {
     var dndEndHour by remember { mutableIntStateOf(nodeManager.dndEndHour) }
 
     var proxyEnabled by remember { mutableStateOf(nodeManager.isProxyEnabled) }
+    var proxyType by remember { mutableStateOf(nodeManager.proxyType) }
     var proxyHost by remember { mutableStateOf(nodeManager.proxyHost) }
     var proxyPort by remember { mutableIntStateOf(nodeManager.proxyPort) }
+    var testingProxy by remember { mutableStateOf(false) }
+    var testResultText by remember { mutableStateOf<String?>(null) }
+    var testResultSuccess by remember { mutableStateOf<Boolean?>(null) }
 
     // SAF 文件选择器
     val exportJsonLauncher = rememberLauncherForActivityResult(
@@ -221,7 +225,7 @@ fun SettingsScreen(viewModel: MainViewModel) {
             ) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(
-                        text = "若拉取 X/Twitter、YouTube 等海外动态时提示连接被重置 (Connection closed)，可开启本项将应用网络请求直通手机上运行的网络加速工具 (如 Clash / Surfboard / v2ray 等，默认端口 7890)：",
+                        text = "若拉取 X/Twitter、YouTube 等海外动态时提示连接被重置 (Connection closed)，可开启本项将应用网络请求直通手机上运行的代理客户端（支持 HTTP / SOCKS5 协议，常见端口：Clash 7890/7897，V2Ray 10808/10809）：",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -236,12 +240,36 @@ fun SettingsScreen(viewModel: MainViewModel) {
                             checked = proxyEnabled,
                             onCheckedChange = {
                                 proxyEnabled = it
-                                viewModel.updateProxySettings(it, proxyHost, proxyPort)
+                                viewModel.updateProxySettings(it, proxyHost, proxyPort, proxyType)
                             }
                         )
                     }
 
                     if (proxyEnabled) {
+                        // 代理协议选择
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text("代理协议:", style = MaterialTheme.typography.labelMedium)
+                            FilterChip(
+                                selected = proxyType == "HTTP",
+                                onClick = {
+                                    proxyType = "HTTP"
+                                    viewModel.updateProxySettings(proxyEnabled, proxyHost, proxyPort, "HTTP")
+                                },
+                                label = { Text("HTTP") }
+                            )
+                            FilterChip(
+                                selected = proxyType == "SOCKS5" || proxyType == "SOCKS",
+                                onClick = {
+                                    proxyType = "SOCKS5"
+                                    viewModel.updateProxySettings(proxyEnabled, proxyHost, proxyPort, "SOCKS5")
+                                },
+                                label = { Text("SOCKS5") }
+                            )
+                        }
+
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -250,7 +278,7 @@ fun SettingsScreen(viewModel: MainViewModel) {
                                 value = proxyHost,
                                 onValueChange = {
                                     proxyHost = it
-                                    viewModel.updateProxySettings(proxyEnabled, it, proxyPort)
+                                    viewModel.updateProxySettings(proxyEnabled, it, proxyPort, proxyType)
                                 },
                                 label = { Text("代理 IP") },
                                 singleLine = true,
@@ -261,12 +289,68 @@ fun SettingsScreen(viewModel: MainViewModel) {
                                 onValueChange = {
                                     val p = it.toIntOrNull() ?: 7890
                                     proxyPort = p
-                                    viewModel.updateProxySettings(proxyEnabled, proxyHost, p)
+                                    viewModel.updateProxySettings(proxyEnabled, proxyHost, p, proxyType)
                                 },
                                 label = { Text("端口") },
                                 singleLine = true,
                                 modifier = Modifier.weight(1f)
                             )
+                        }
+                    }
+
+                    // 连通性测试按钮与反馈
+                    OutlinedButton(
+                        onClick = {
+                            testingProxy = true
+                            testResultText = null
+                            testResultSuccess = null
+                            viewModel.testProxyConnection { success, message ->
+                                testingProxy = false
+                                testResultSuccess = success
+                                testResultText = message
+                            }
+                        },
+                        enabled = !testingProxy,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        if (testingProxy) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("正在测试连通性...")
+                        } else {
+                            Icon(Icons.Default.NetworkCheck, contentDescription = null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("测试网络与代理连通性")
+                        }
+                    }
+
+                    if (testResultText != null) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (testResultSuccess == true) {
+                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                            } else {
+                                MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f)
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(12.dp),
+                                verticalAlignment = Alignment.Top
+                            ) {
+                                Icon(
+                                    imageVector = if (testResultSuccess == true) Icons.Default.CheckCircle else Icons.Default.ErrorOutline,
+                                    contentDescription = null,
+                                    tint = if (testResultSuccess == true) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = testResultText ?: "",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (testResultSuccess == true) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onErrorContainer
+                                )
+                            }
                         }
                     }
                 }
