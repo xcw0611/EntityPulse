@@ -98,8 +98,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     suspend fun testCandidateChannel(feedUrl: String): Result<ParsedFeedItem> {
         return runCatching { repository.testChannel(feedUrl) }
     }
-        _showUnreadOnly.value = !_showUnreadOnly.value
-    }
 
     fun refreshAll() {
         viewModelScope.launch {
