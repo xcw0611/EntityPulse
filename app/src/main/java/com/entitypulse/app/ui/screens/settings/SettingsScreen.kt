@@ -14,6 +14,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.entitypulse.app.data.model.TimeRangeFilter
@@ -411,6 +414,104 @@ fun SettingsScreen(viewModel: MainViewModel) {
                                 )
                             }
                         }
+                    }
+
+                    HorizontalDivider()
+
+                    // 诊断日志按钮与查看弹窗
+                    var showLogDialog by remember { mutableStateOf(false) }
+                    val clipboardManager = LocalClipboardManager.current
+
+                    FilledTonalButton(
+                        onClick = { showLogDialog = true },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.Terminal, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("查看 / 导出运行与同步诊断日志")
+                    }
+
+                    if (showLogDialog) {
+                        var logContent by remember { mutableStateOf(viewModel.getRecentLogs()) }
+                        AlertDialog(
+                            onDismissRequest = { showLogDialog = false },
+                            title = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.BugReport, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("运行与同步诊断日志", style = MaterialTheme.typography.titleMedium)
+                                }
+                            },
+                            text = {
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text(
+                                        text = "免 Root 存储路径 (手机文件管理器可直接访问):",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.outline
+                                    )
+                                    Surface(
+                                        shape = RoundedCornerShape(6.dp),
+                                        color = MaterialTheme.colorScheme.surfaceVariant,
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text(
+                                            text = viewModel.getLogFilePath(),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontFamily = FontFamily.Monospace,
+                                            modifier = Modifier.padding(6.dp)
+                                        )
+                                    }
+
+                                    Card(
+                                        shape = RoundedCornerShape(8.dp),
+                                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .heightIn(max = 280.dp)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .verticalScroll(rememberScrollState())
+                                                .padding(8.dp)
+                                        ) {
+                                            Text(
+                                                text = logContent,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                fontFamily = FontFamily.Monospace
+                                            )
+                                        }
+                                    }
+                                }
+                            },
+                            confirmButton = {
+                                Button(
+                                    onClick = {
+                                        clipboardManager.setText(AnnotatedString(logContent))
+                                    }
+                                ) {
+                                    Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("一键复制全部日志")
+                                }
+                            },
+                            dismissButton = {
+                                Row {
+                                    TextButton(
+                                        onClick = {
+                                            viewModel.clearAppLogs()
+                                            logContent = "日志已清空"
+                                        }
+                                    ) {
+                                        Text("清空")
+                                    }
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    TextButton(onClick = { showLogDialog = false }) {
+                                        Text("关闭")
+                                    }
+                                }
+                            }
+                        )
                     }
                 }
             }

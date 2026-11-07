@@ -1,5 +1,6 @@
 package com.entitypulse.app.network
 
+import com.entitypulse.app.util.AppLogger
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
@@ -26,19 +27,25 @@ object TwitterSyndicationParser {
             .header("Accept-Language", "en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7")
             .build()
 
+        AppLogger.d("TwitterSyndication", "请求 Twitter Syndication: $url")
         client.newCall(request).execute().use { response ->
             if (!response.isSuccessful) {
+                AppLogger.w("TwitterSyndication", "Twitter 响应失败: HTTP ${response.code} ${response.message}")
                 throw IllegalStateException("Twitter Syndication HTTP ${response.code} ${response.message}")
             }
             val html = response.body?.string() ?: throw IllegalStateException("Twitter 响应内容为空")
 
             val matcher = nextDataPattern.matcher(html)
             if (!matcher.find()) {
+                val preview = html.take(250).replace("\n", " ")
+                AppLogger.w("TwitterSyndication", "未在 Twitter 页面找到 __NEXT_DATA__。预览: $preview")
                 throw IllegalStateException("未能在 Twitter 页面中解析到数据结构，请检查代理配置或稍后重试")
             }
 
             val jsonStr = matcher.group(1)?.trim() ?: throw IllegalStateException("Twitter 数据为空")
-            return parseSyndicationJson(cleanUser, jsonStr)
+            val parsed = parseSyndicationJson(cleanUser, jsonStr)
+            AppLogger.i("TwitterSyndication", "成功拉取 Twitter 用户 @$cleanUser 最新动态，共 ${parsed.items.size} 条")
+            return parsed
         }
     }
 

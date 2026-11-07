@@ -9,6 +9,7 @@ import com.entitypulse.app.data.AppDatabase
 import com.entitypulse.app.data.model.*
 import com.entitypulse.app.network.*
 import com.entitypulse.app.notification.NotificationHelper
+import com.entitypulse.app.util.AppLogger
 import com.entitypulse.app.repository.FeedRepository
 import com.entitypulse.app.sync.SyncWorker
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -346,6 +347,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }.onFailure {
                 _userMessage.emit("导出失败: ${it.localizedMessage}")
             }
+        }
+    }
+
+    fun getRecentLogs(): String {
+        return AppLogger.getRecentLogsText()
+    }
+
+    fun getLogFilePath(): String {
+        return AppLogger.getLogFilePath()
+    }
+
+    fun clearAppLogs() {
+        AppLogger.clearLogs()
+        viewModelScope.launch {
+            _userMessage.emit("诊断日志已清空")
         }
     }
 }

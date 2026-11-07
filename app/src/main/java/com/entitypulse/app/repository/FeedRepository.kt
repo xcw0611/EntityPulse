@@ -8,6 +8,7 @@ import com.entitypulse.app.network.ParsedFeed
 import com.entitypulse.app.network.ParsedFeedItem
 import com.entitypulse.app.network.PlatformResolver
 import com.entitypulse.app.network.TwitterSyndicationParser
+import com.entitypulse.app.util.AppLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
@@ -158,6 +159,7 @@ class FeedRepository(
      */
     suspend fun syncChannel(channel: SourceChannelRecord): List<FeedItemRecord> = withContext(Dispatchers.IO) {
         val newSavedItems = mutableListOf<FeedItemRecord>()
+        AppLogger.i("SyncEngine", "开始同步频道: ${channel.title} (ID=${channel.id}, URL=${channel.resolvedFeedUrl})")
         try {
             val parsedFeed = fetchFeed(channel.resolvedFeedUrl)
 
@@ -187,8 +189,10 @@ class FeedRepository(
             }
 
             channelDao.updateSyncStatus(channel.id, System.currentTimeMillis(), null)
+            AppLogger.i("SyncEngine", "频道 [${channel.title}] 同步成功，拉取到 ${parsedFeed.items.size} 条，新入库 ${newSavedItems.size} 条")
         } catch (e: Exception) {
             val errorMsg = e.localizedMessage ?: "同步失败"
+            AppLogger.e("SyncEngine", "频道 [${channel.title}] 同步异常: $errorMsg", e)
             channelDao.updateSyncStatus(channel.id, System.currentTimeMillis(), errorMsg)
         }
         newSavedItems
@@ -273,6 +277,7 @@ class FeedRepository(
     }
 
     private fun executeRequest(url: String): String {
+        AppLogger.d("HttpRequest", "发起 HTTP 请求: $url")
         val request = Request.Builder()
             .url(url)
             .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
@@ -280,13 +285,17 @@ class FeedRepository(
             .build()
 
         getHttpClient().newCall(request).execute().use { response ->
+            val body = response.body?.string()
             if (!response.isSuccessful) {
+                val preview = body?.take(200)?.replace("\n", " ") ?: ""
+                AppLogger.w("HttpRequest", "HTTP 失败: code=${response.code} msg=${response.message} [URL: $url] - 预览: $preview")
                 throw IllegalStateException("HTTP ${response.code} ${response.message}")
             }
-            val body = response.body?.string()
             if (body.isNullOrBlank()) {
+                AppLogger.w("HttpRequest", "响应为空: HTTP ${response.code} [URL: $url]")
                 throw IllegalStateException("响应内容为空")
             }
+            AppLogger.d("HttpRequest", "请求成功: HTTP ${response.code} [URL: $url, 数据长度: ${body.length}]")
             return body
         }
     }
