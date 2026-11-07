@@ -2,12 +2,14 @@ package com.entitypulse.app.repository
 
 import com.entitypulse.app.data.AppDatabase
 import com.entitypulse.app.data.model.*
+import com.entitypulse.app.network.BilibiliResolver
 import com.entitypulse.app.network.FeedParser
 import com.entitypulse.app.network.NodeManager
 import com.entitypulse.app.network.ParsedFeed
 import com.entitypulse.app.network.ParsedFeedItem
 import com.entitypulse.app.network.PlatformResolver
 import com.entitypulse.app.network.TwitterSyndicationParser
+import com.entitypulse.app.network.YouTubeResolver
 import com.entitypulse.app.util.AppLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -16,7 +18,9 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
 import java.io.IOException
+import java.net.URI
 import java.util.concurrent.TimeUnit
+import java.util.regex.Pattern
 
 class FeedRepository(
     private val database: AppDatabase,
@@ -214,7 +218,20 @@ class FeedRepository(
     }
 
     private suspend fun fetchFeed(feedPathOrUrl: String): ParsedFeed = withContext(Dispatchers.IO) {
-        // 1. 若为 Twitter / X，优先调用官方 Syndication 接口免登录抓取
+        // 1. YouTube 原生官方 Atom XML 订阅抓取（彻底摆脱公共 RSSHub 节点 403 阻断）
+        if (YouTubeResolver.isYouTubeTarget(feedPathOrUrl)) {
+            try {
+                val nativeRssUrl = YouTubeResolver.resolveToNativeRssUrl(feedPathOrUrl, getHttpClient())
+                AppLogger.i("FeedRepository", "YouTube 渠道已解析为官方原生 Atom RSS: $nativeRssUrl")
+                val xml = executeRequest(nativeRssUrl)
+                return@withContext FeedParser.parse(xml)
+            } catch (e: Exception) {
+                AppLogger.e("FeedRepository", "YouTube 原生抓取异常: ${e.message}", e)
+                throw diagnoseNetworkError(e, feedPathOrUrl)
+            }
+        }
+
+        // 2. 若为 Twitter / X，优先调用官方 Syndication 接口免登录抓取
         val isTwitter = feedPathOrUrl.startsWith("/twitter/user/", ignoreCase = true) ||
                 feedPathOrUrl.contains("twitter.com", ignoreCase = true) ||
                 feedPathOrUrl.contains("x.com", ignoreCase = true)
@@ -225,21 +242,58 @@ class FeedRepository(
                 try {
                     return@withContext TwitterSyndicationParser.fetchTimeline(username, getHttpClient())
                 } catch (e: Exception) {
-                    // 若官方 Syndication 失败（如频控限制），继续向下尝试配置的 RSSHub 节点池
+                    val msg = e.message ?: ""
+                    // 若是频控 429，直接向用户展示精准诊断提示，避免 fallback 到死节点产生 Connection closed
+                    if (msg.contains("429") || msg.contains("频控")) {
+                        throw e
+                    }
+                    AppLogger.w("FeedRepository", "Twitter Syndication 接口抓取失败 ($msg)，尝试备用 RSSHub 节点池")
                 }
             }
         }
 
-        // 2. 传统 RSS/Atom 直连抓取或通过 RSSHub 镜像池
-        val isDirectUrl = feedPathOrUrl.startsWith("http://", ignoreCase = true) ||
-                feedPathOrUrl.startsWith("https://", ignoreCase = true)
+        // 3. Bilibili 动态/视频：若传入的是非数字关键词，自动联网解析为数字 UID
+        var resolvedPath = feedPathOrUrl
+        if (resolvedPath.startsWith("/bilibili/user/video/", ignoreCase = true)) {
+            resolvedPath = BilibiliResolver.resolveNumericFeedPath(resolvedPath, getHttpClient())
+        }
+
+        // 4. 传统 RSS/Atom 直连抓取或通过 RSSHub 镜像池
+        val isDirectUrl = resolvedPath.startsWith("http://", ignoreCase = true) ||
+                resolvedPath.startsWith("https://", ignoreCase = true)
 
         if (isDirectUrl) {
             try {
-                val xml = executeRequest(feedPathOrUrl)
-                return@withContext FeedParser.parse(xml)
+                val responseText = executeRequest(resolvedPath)
+                val trimmed = responseText.trim()
+                if (trimmed.startsWith("<!DOCTYPE", ignoreCase = true) || trimmed.startsWith("<html", ignoreCase = true)) {
+                    // 该 URL 返回了网页 HTML 而非标准 XML，尝试 RSS Autodiscovery 探测
+                    val discoveredFeedUrl = discoverRssFeedUrl(trimmed, resolvedPath)
+                    if (discoveredFeedUrl != null) {
+                        AppLogger.i("FeedRepository", "从官网 HTML 中自动发现 RSS 订阅源: $discoveredFeedUrl")
+                        val feedXml = executeRequest(discoveredFeedUrl)
+                        return@withContext FeedParser.parse(feedXml)
+                    }
+
+                    // 尝试常见静态后缀
+                    val commonSuffixes = listOf("/feed", "/rss", "/rss.xml", "/feed.xml", "/blog/feed")
+                    for (suffix in commonSuffixes) {
+                        try {
+                            val candidate = resolvedPath.trimEnd('/') + suffix
+                            val testXml = executeRequest(candidate)
+                            val candTrim = testXml.trim()
+                            if (!candTrim.startsWith("<html", ignoreCase = true) && !candTrim.startsWith("<!DOCTYPE", ignoreCase = true)) {
+                                AppLogger.i("FeedRepository", "通过常见后缀命中 RSS: $candidate")
+                                return@withContext FeedParser.parse(testXml)
+                            }
+                        } catch (_: Exception) {}
+                    }
+
+                    throw IllegalStateException("该官网主页未声明公开的 RSS/Atom 订阅源，建议配置该主体的社交媒体渠道（如 X、YouTube 等），或在【主体详情】中直接点击官网网址进行网页浏览。")
+                }
+                return@withContext FeedParser.parse(trimmed)
             } catch (e: Exception) {
-                throw diagnoseNetworkError(e, feedPathOrUrl)
+                throw diagnoseNetworkError(e, resolvedPath)
             }
         }
 
@@ -249,7 +303,7 @@ class FeedRepository(
 
         for (node in candidateNodes) {
             val fullUrl = PlatformResolver.buildFinalUrl(
-                feedPathOrUrl = feedPathOrUrl,
+                feedPathOrUrl = resolvedPath,
                 baseRssHubUrl = node,
                 token = nodeManager.accessToken.ifBlank { null }
             )
@@ -261,7 +315,46 @@ class FeedRepository(
             }
         }
 
-        throw diagnoseNetworkError(lastError ?: IllegalStateException("无法连通任何数据节点"), feedPathOrUrl)
+        throw diagnoseNetworkError(lastError ?: IllegalStateException("无法连通任何数据节点"), resolvedPath)
+    }
+
+    private fun discoverRssFeedUrl(html: String, baseUrl: String): String? {
+        val linkPattern = Pattern.compile(
+            "<link\\s+[^>]*rel=[\"']alternate[\"'][^>]*type=[\"'](application/(?:rss|atom)\\+xml|text/xml)[\"'][^>]*href=[\"']([^\"']+)[\"']",
+            Pattern.CASE_INSENSITIVE
+        )
+        var matcher = linkPattern.matcher(html)
+        if (matcher.find()) {
+            val href = matcher.group(2)
+            if (!href.isNullOrBlank()) {
+                return resolveRelativeUrl(baseUrl, href)
+            }
+        }
+        val linkPatternReverse = Pattern.compile(
+            "<link\\s+[^>]*type=[\"'](application/(?:rss|atom)\\+xml|text/xml)[\"'][^>]*rel=[\"']alternate[\"'][^>]*href=[\"']([^\"']+)[\"']",
+            Pattern.CASE_INSENSITIVE
+        )
+        matcher = linkPatternReverse.matcher(html)
+        if (matcher.find()) {
+            val href = matcher.group(2)
+            if (!href.isNullOrBlank()) {
+                return resolveRelativeUrl(baseUrl, href)
+            }
+        }
+        return null
+    }
+
+    private fun resolveRelativeUrl(baseUrl: String, href: String): String {
+        return try {
+            val baseUri = URI(baseUrl)
+            baseUri.resolve(href).toString()
+        } catch (_: Exception) {
+            if (href.startsWith("http://", ignoreCase = true) || href.startsWith("https://", ignoreCase = true)) {
+                href
+            } else {
+                baseUrl.trimEnd('/') + "/" + href.trimStart('/')
+            }
+        }
     }
 
     private fun extractTwitterUsername(pathOrUrl: String): String {
@@ -302,6 +395,15 @@ class FeedRepository(
 
     private fun diagnoseNetworkError(e: Throwable, target: String): Exception {
         val msg = e.localizedMessage ?: ""
+        if (msg.contains("未声明公开的 RSS") ||
+            msg.contains("频控") ||
+            msg.contains("未找到 YouTube 频道") ||
+            msg.contains("未能在 Twitter 页面中解析") ||
+            msg.contains("未发布任何公开动态")
+        ) {
+            return if (e is Exception) e else IllegalStateException(msg, e)
+        }
+
         val isConnectionClosed = msg.contains("closed", ignoreCase = true) ||
                 msg.contains("reset", ignoreCase = true) ||
                 msg.contains("EOF", ignoreCase = true)

@@ -180,7 +180,7 @@ object FeedParser {
                     "id" -> id = parser.nextTextSafely()
                     "published", "updated" -> if (updatedStr.isEmpty()) updatedStr = parser.nextTextSafely()
                     "summary" -> summary = parser.nextTextSafely()
-                    "content" -> content = parser.nextTextSafely()
+                    "content", "description", "media:description" -> if (content.isEmpty()) content = parser.nextTextSafely()
                     "link" -> {
                         val rel = parser.getAttributeValue(null, "rel")
                         val href = parser.getAttributeValue(null, "href")
@@ -192,7 +192,7 @@ object FeedParser {
                             }
                         }
                     }
-                    "media:thumbnail" -> {
+                    "media:thumbnail", "thumbnail" -> {
                         val url = parser.getAttributeValue(null, "url")
                         if (url != null && thumb == null) thumb = url
                     }
@@ -212,8 +212,17 @@ object FeedParser {
         val html = if (content.isNotBlank()) content else summary
         val plainText = stripHtml(html)
         val extractedImages = extractImagesFromHtml(html)
+        if (thumb == null && link.contains("youtube.com/watch?v=")) {
+            val vId = link.substringAfter("watch?v=").substringBefore('&')
+            if (vId.isNotBlank()) {
+                thumb = "https://i.ytimg.com/vi/$vId/hqdefault.jpg"
+            }
+        }
         if (thumb == null && extractedImages.isNotEmpty()) {
             thumb = extractedImages.first()
+        }
+        if (thumb != null && !mediaList.contains(thumb)) {
+            mediaList.add(0, thumb)
         }
         mediaList.addAll(extractedImages.filterNot { mediaList.contains(it) })
 

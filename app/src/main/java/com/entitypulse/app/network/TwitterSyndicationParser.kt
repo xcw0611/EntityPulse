@@ -29,6 +29,10 @@ object TwitterSyndicationParser {
 
         AppLogger.d("TwitterSyndication", "请求 Twitter Syndication: $url")
         client.newCall(request).execute().use { response ->
+            if (response.code == 429) {
+                AppLogger.w("TwitterSyndication", "Twitter (X) 接口遇到频控限制: HTTP 429")
+                throw IllegalStateException("Twitter (X) 接口遇到临时频控限制 (HTTP 429 Too Many Requests)，将在片刻后自动恢复，请稍后再试")
+            }
             if (!response.isSuccessful) {
                 AppLogger.w("TwitterSyndication", "Twitter 响应失败: HTTP ${response.code} ${response.message}")
                 throw IllegalStateException("Twitter Syndication HTTP ${response.code} ${response.message}")

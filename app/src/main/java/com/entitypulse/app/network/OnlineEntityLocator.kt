@@ -88,7 +88,7 @@ object OnlineEntityLocator {
 
         val discoveredTwitterHandles = mutableListOf<Pair<String, String>>() // Handle to Note
         val discoveredYouTubeChannels = mutableListOf<Pair<String, String>>()
-        val discoveredBilibiliNames = mutableListOf<Pair<String, String>>()
+        val discoveredBilibiliCreators = mutableListOf<BilibiliResolver.BilibiliCreator>()
         val discoveredOfficialLinks = mutableListOf<String>()
 
         // 2. 尝试探测 Steam 游戏 IP
@@ -152,12 +152,13 @@ object OnlineEntityLocator {
             }
         } catch (_: Exception) {}
 
-        // 5. 针对该 IP 进行 Bilibili 官方 / 认证账号针对性检索
+        // 5. 针对该 IP 进行 Bilibili 官方 / 认证账号针对性检索（直接获取真实 UID 与粉丝数）
         try {
-            val biliNames = fetchBilibiliSuggestions(detectedName, client)
-            biliNames.forEach { name ->
-                val note = if (name.contains("官方") || name.contains("动画") || name.contains("手游")) "B站官方认证" else "B站检索"
-                discoveredBilibiliNames.add(name to note)
+            val creators = BilibiliResolver.searchCreators(detectedName, client)
+            discoveredBilibiliCreators.addAll(creators)
+            if (discoveredBilibiliCreators.isEmpty() && !detectedOriginalName.isNullOrBlank()) {
+                val moreCreators = BilibiliResolver.searchCreators(detectedOriginalName, client)
+                discoveredBilibiliCreators.addAll(moreCreators)
             }
         } catch (_: Exception) {}
 
@@ -213,13 +214,23 @@ object OnlineEntityLocator {
 
         // (2) Bilibili 分组
         val biliCandidates = mutableListOf<PredefinedChannel>()
-        discoveredBilibiliNames.distinctBy { it.first.lowercase() }.forEachIndexed { idx, (name, note) ->
+        discoveredBilibiliCreators.distinctBy { it.mid }.forEachIndexed { idx, creator ->
+            val fansText = when {
+                creator.fans >= 10000 -> "${creator.fans / 10000}.${(creator.fans % 10000) / 1000}万"
+                else -> "${creator.fans}"
+            }
+            val note = when {
+                creator.isOfficial -> "B站官方认证"
+                creator.verifyDesc.isNotBlank() -> creator.verifyDesc
+                creator.fans >= 10000 -> "热门UP主 ($fansText 粉丝)"
+                else -> "UP主 ($fansText 粉丝)"
+            }
             biliCandidates.add(
                 PredefinedChannel(
                     platformType = PlatformType.BILIBILI,
-                    identifier = name,
-                    title = "Bilibili ($name)",
-                    feedPathOrUrl = "/bilibili/user/video/$name",
+                    identifier = "UID: ${creator.mid}",
+                    title = "Bilibili (${creator.uname} · $fansText 粉丝)",
+                    feedPathOrUrl = "/bilibili/user/video/${creator.mid}",
                     defaultSelected = idx == 0,
                     probabilityNote = note
                 )
@@ -233,7 +244,7 @@ object OnlineEntityLocator {
                     title = "Bilibili ($detectedName)",
                     feedPathOrUrl = "/bilibili/user/video/$detectedName",
                     defaultSelected = true,
-                    probabilityNote = "原名检索"
+                    probabilityNote = "名称检索"
                 )
             )
         }
@@ -574,30 +585,5 @@ object OnlineEntityLocator {
         return emptyList()
     }
 
-    private fun fetchBilibiliSuggestions(query: String, client: OkHttpClient): List<String> {
-        val encoded = URLEncoder.encode(query, "UTF-8")
-        val url = "https://s.search.bilibili.com/main/suggest?term=$encoded"
-        val request = Request.Builder()
-            .url(url)
-            .header("User-Agent", "Mozilla/5.0")
-            .build()
 
-        client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) return emptyList()
-            val body = response.body?.string() ?: return emptyList()
-            val root = JSONObject(body)
-            val result = root.optJSONObject("result") ?: return emptyList()
-            val tagArray = result.optJSONArray("tag") ?: return emptyList()
-            val list = mutableListOf<String>()
-            for (i in 0 until tagArray.length()) {
-                val item = tagArray.optJSONObject(i)
-                val value = item?.optString("value")
-                if (!value.isNullOrBlank()) {
-                    list.add(value)
-                }
-            }
-            return list
-        }
-        return emptyList()
-    }
 }
