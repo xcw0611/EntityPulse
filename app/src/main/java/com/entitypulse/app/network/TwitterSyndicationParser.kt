@@ -14,6 +14,27 @@ object TwitterSyndicationParser {
     private val nextDataPattern = Pattern.compile("<script\\s+id=[\"']__NEXT_DATA__[\"'][^>]*>(.*?)</script>", Pattern.DOTALL)
 
     /**
+     * 快速验证 X (Twitter) 账号是否存在（通过轻量 HEAD 请求）
+     */
+    fun checkUserExists(username: String, client: OkHttpClient): Boolean {
+        val clean = username.trim().removePrefix("@")
+        if (clean.isBlank()) return false
+        val url = "https://x.com/$clean"
+        val request = Request.Builder()
+            .url(url)
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+            .head()
+            .build()
+        return try {
+            client.newCall(request).execute().use { response ->
+                response.code != 404
+            }
+        } catch (_: Exception) {
+            true
+        }
+    }
+
+    /**
      * 免登录直接从 Twitter 官方 Syndication 接口拉取用户最新推文时间线
      */
     fun fetchTimeline(username: String, client: OkHttpClient): ParsedFeed {
@@ -29,9 +50,13 @@ object TwitterSyndicationParser {
 
         AppLogger.d("TwitterSyndication", "请求 Twitter Syndication: $url")
         client.newCall(request).execute().use { response ->
+            if (response.code == 404) {
+                AppLogger.w("TwitterSyndication", "Twitter (X) 账号不存在: @$cleanUser [HTTP 404]")
+                throw IllegalStateException("X (Twitter) 上不存在账号 @$cleanUser [HTTP 404]。该主体可能未注册同名推特，或官方账号使用了不同名称。建议在【主体详情】中修改或删除该渠道。")
+            }
             if (response.code == 429) {
                 AppLogger.w("TwitterSyndication", "Twitter (X) 接口遇到频控限制: HTTP 429")
-                throw IllegalStateException("Twitter (X) 接口遇到临时频控限制 (HTTP 429 Too Many Requests)，将在片刻后自动恢复，请稍后再试")
+                throw IllegalStateException("X (Twitter) 接口遇到临时频控限制 (HTTP 429 Too Many Requests)，防刷机制生效，将在片刻后自动恢复，并非网络断开。")
             }
             if (!response.isSuccessful) {
                 AppLogger.w("TwitterSyndication", "Twitter 响应失败: HTTP ${response.code} ${response.message}")
@@ -39,11 +64,22 @@ object TwitterSyndicationParser {
             }
             val html = response.body?.string() ?: throw IllegalStateException("Twitter 响应内容为空")
 
+            if (html.contains("This account doesn’t exist", ignoreCase = true) || html.contains("user_not_found", ignoreCase = true)) {
+                throw IllegalStateException("X (Twitter) 上不存在账号 @$cleanUser。该主体可能未开设该平台账号或已注销。")
+            }
+            if (html.contains("Account suspended", ignoreCase = true) || html.contains("suspended", ignoreCase = true)) {
+                throw IllegalStateException("X (Twitter) 账号 @$cleanUser 已被官方冻结。")
+            }
+
             val matcher = nextDataPattern.matcher(html)
             if (!matcher.find()) {
                 val preview = html.take(250).replace("\n", " ")
                 AppLogger.w("TwitterSyndication", "未在 Twitter 页面找到 __NEXT_DATA__。预览: $preview")
-                throw IllegalStateException("未能在 Twitter 页面中解析到数据结构，请检查代理配置或稍后重试")
+                // 双重核验：如果 HEAD 也返回 404，则明确告知不存在
+                if (!checkUserExists(cleanUser, client)) {
+                    throw IllegalStateException("X (Twitter) 上不存在账号 @$cleanUser [HTTP 404]。")
+                }
+                throw IllegalStateException("未能在 Twitter 页面中解析到数据，可能该账号为私密账号或近期无推文")
             }
 
             val jsonStr = matcher.group(1)?.trim() ?: throw IllegalStateException("Twitter 数据为空")

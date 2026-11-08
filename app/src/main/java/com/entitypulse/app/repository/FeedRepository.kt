@@ -395,27 +395,66 @@ class FeedRepository(
 
     private fun diagnoseNetworkError(e: Throwable, target: String): Exception {
         val msg = e.localizedMessage ?: ""
+
+        // 1. 若已经是我们抛出的明确业务诊断，原样保留
         if (msg.contains("未声明公开的 RSS") ||
             msg.contains("频控") ||
             msg.contains("未找到 YouTube 频道") ||
-            msg.contains("未能在 Twitter 页面中解析") ||
-            msg.contains("未发布任何公开动态")
+            msg.contains("不存在") ||
+            msg.contains("未在") ||
+            msg.contains("未发布任何公开动态") ||
+            msg.contains("已注销") ||
+            msg.contains("冻结")
         ) {
             return if (e is Exception) e else IllegalStateException(msg, e)
         }
 
+        // 2. 账号/资源不存在判定 (HTTP 404 / Not Found)
+        if (msg.contains("404") || msg.contains("Not Found", ignoreCase = true)) {
+            val platformName = when {
+                target.contains("twitter", true) || target.contains("x.com", true) -> "X (Twitter)"
+                target.contains("youtube", true) || target.contains("youtu.be", true) -> "YouTube"
+                target.contains("bilibili", true) -> "Bilibili"
+                target.contains("steam", true) -> "Steam"
+                target.contains("reddit", true) -> "Reddit"
+                else -> "目标平台"
+            }
+            val idPreview = target.substringAfterLast('/').substringBefore('?').removePrefix("@")
+            return IllegalStateException(
+                "$platformName 上未找到该账号或内容 (@$idPreview) [HTTP 404]。\n" +
+                "该作品或创作者可能未在此平台开设独立官方账号（例如很多作品的视频统一在所属制作公司或创作者个人频道发布），或官方使用了不同名称。\n" +
+                "此报错非网络故障，建议在【主体详情】中核对/修改账号标识，或直接删除该渠道。"
+            )
+        }
+
+        // 3. 频控限制 (HTTP 429 Too Many Requests)
+        if (msg.contains("429") || msg.contains("Too Many Requests", ignoreCase = true)) {
+            return IllegalStateException(
+                "目标平台触发了临时访问频控 (HTTP 429 Too Many Requests)，将在片刻后自动恢复。此非网络或代理故障，请稍候再试。"
+            )
+        }
+
+        // 4. 防爬虫/鉴权阻断 (HTTP 403 Forbidden)
+        if (msg.contains("403") || msg.contains("Forbidden", ignoreCase = true)) {
+            return IllegalStateException(
+                "目标节点触发了安全防护或鉴权限制 (HTTP 403 Forbidden)。若使用的是公共 RSSHub，可能被 Cloudflare 拦截；建议在【设置】中配置具有 Token 的自建节点或通过浏览器直接访问。"
+            )
+        }
+
+        // 5. 真正的底层网络/代理连通异常
         val isConnectionClosed = msg.contains("closed", ignoreCase = true) ||
                 msg.contains("reset", ignoreCase = true) ||
                 msg.contains("EOF", ignoreCase = true)
         val isTimeout = msg.contains("timeout", ignoreCase = true) || msg.contains("timed out", ignoreCase = true)
+        val isRefused = msg.contains("refused", ignoreCase = true) || msg.contains("ConnectException", ignoreCase = true)
+        val isDnsFailed = msg.contains("Unable to resolve host", ignoreCase = true) || msg.contains("UnknownHost", ignoreCase = true)
 
         val friendlyReason = when {
-            target.contains("twitter", ignoreCase = true) || target.contains("x.com", ignoreCase = true) ->
-                "X (Twitter) 数据连接失败 ($msg)。Twitter 访问需要海外网络，请在【设置】中配置本地代理端口（如 Clash: 7890/7897，V2Ray: 10808）并点击【测试网络连通性】。"
-            isConnectionClosed -> "连接被对端中断或重置 (Connection closed)。若正在访问海外站点，通常由于国内直连受限，请在【设置】中配置本地代理端口 (如 127.0.0.1:7890/7897) 或开启网络加速后重试。"
-            isTimeout -> "请求超时。目标服务器响应过慢，请检查网络环境或在【设置】中切换自建 RSSHub 节点。"
-            msg.contains("403") || msg.contains("404") -> "目标源受限或不存在 ($msg)。建议在【设置】中配置具备鉴权 Token 的自建 RSSHub 实例。"
-            else -> "网络连接失败: $msg"
+            isRefused -> "代理端口连接被拒绝 (Connection Refused)。请确认 Clash Meta 代理应用已启动且本地监听端口设置正确。"
+            isDnsFailed -> "网络域名解析失败，请检查手机网络连接状态。"
+            isConnectionClosed -> "网络连接被对端中断或重置 (Connection closed)。若正在访问海外站点，通常由于国内直连受限或代理节点不稳定，请检查 Clash Meta 节点连通性。"
+            isTimeout -> "网络请求超时，目标服务器响应过慢，请检查网络延迟。"
+            else -> "连接异常: $msg"
         }
         return IllegalStateException(friendlyReason, e)
     }

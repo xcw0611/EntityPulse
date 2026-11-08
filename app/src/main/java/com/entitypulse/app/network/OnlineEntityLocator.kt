@@ -180,24 +180,34 @@ object OnlineEntityLocator {
             } catch (_: Exception) {}
         }
 
-        // 7. 组装多平台真实候选卡片（摒弃机械后缀，严格依托检索发现）
+        // 7. 组装多平台真实候选卡片（严格预检验真实性，未开设账号的平台默认不勾选）
         val candidateGroups = mutableListOf<PlatformCandidateGroup>()
 
         // (1) X / Twitter 分组
-        val twCandidates = mutableListOf<PredefinedChannel>()
-        discoveredTwitterHandles.distinctBy { it.first.lowercase() }.forEachIndexed { idx, (handle, note) ->
-            twCandidates.add(
-                PredefinedChannel(
-                    platformType = PlatformType.TWITTER,
-                    identifier = "@$handle",
-                    title = "X / Twitter (@$handle)",
-                    feedPathOrUrl = "/twitter/user/$handle",
-                    defaultSelected = idx == 0,
-                    probabilityNote = note
-                )
-            )
+        val verifiedTwitter = mutableListOf<Pair<String, String>>()
+        for ((handle, note) in discoveredTwitterHandles.distinctBy { it.first.lowercase() }) {
+            if (TwitterSyndicationParser.checkUserExists(handle, client)) {
+                verifiedTwitter.add(handle to note)
+            } else {
+                AppLogger.i("OnlineEntityLocator", "过滤不存在的推特账号: @$handle (HTTP 404)")
+            }
         }
-        if (twCandidates.isEmpty()) {
+        val twCandidates = mutableListOf<PredefinedChannel>()
+        val hasTw = verifiedTwitter.isNotEmpty()
+        if (hasTw) {
+            verifiedTwitter.forEachIndexed { idx, (handle, note) ->
+                twCandidates.add(
+                    PredefinedChannel(
+                        platformType = PlatformType.TWITTER,
+                        identifier = "@$handle",
+                        title = "X / Twitter (@$handle)",
+                        feedPathOrUrl = "/twitter/user/$handle",
+                        defaultSelected = idx == 0,
+                        probabilityNote = note
+                    )
+                )
+            }
+        } else {
             val fallbackHandle = (detectedOriginalName ?: detectedName).replace("\\s+".toRegex(), "")
             twCandidates.add(
                 PredefinedChannel(
@@ -205,50 +215,52 @@ object OnlineEntityLocator {
                     identifier = "@$fallbackHandle",
                     title = "X / Twitter (@$fallbackHandle)",
                     feedPathOrUrl = "/twitter/user/$fallbackHandle",
-                    defaultSelected = true,
-                    probabilityNote = "标准账号"
+                    defaultSelected = false,
+                    probabilityNote = "未在推特检索到官方账号 (可能未开设)"
                 )
             )
         }
-        candidateGroups.add(PlatformCandidateGroup(PlatformType.TWITTER, twCandidates, 0, true))
+        candidateGroups.add(PlatformCandidateGroup(PlatformType.TWITTER, twCandidates, 0, isEnabled = hasTw))
 
         // (2) Bilibili 分组
         val biliCandidates = mutableListOf<PredefinedChannel>()
-        discoveredBilibiliCreators.distinctBy { it.mid }.forEachIndexed { idx, creator ->
-            val fansText = when {
-                creator.fans >= 10000 -> "${creator.fans / 10000}.${(creator.fans % 10000) / 1000}万"
-                else -> "${creator.fans}"
-            }
-            val note = when {
-                creator.isOfficial -> "B站官方认证"
-                creator.verifyDesc.isNotBlank() -> creator.verifyDesc
-                creator.fans >= 10000 -> "热门UP主 ($fansText 粉丝)"
-                else -> "UP主 ($fansText 粉丝)"
-            }
-            biliCandidates.add(
-                PredefinedChannel(
-                    platformType = PlatformType.BILIBILI,
-                    identifier = "UID: ${creator.mid}",
-                    title = "Bilibili (${creator.uname} · $fansText 粉丝)",
-                    feedPathOrUrl = "/bilibili/user/video/${creator.mid}",
-                    defaultSelected = idx == 0,
-                    probabilityNote = note
+        val hasBili = discoveredBilibiliCreators.isNotEmpty()
+        if (hasBili) {
+            discoveredBilibiliCreators.distinctBy { it.mid }.forEachIndexed { idx, creator ->
+                val fansText = when {
+                    creator.fans >= 10000 -> "${creator.fans / 10000}.${(creator.fans % 10000) / 1000}万"
+                    else -> "${creator.fans}"
+                }
+                val note = when {
+                    creator.isOfficial -> "B站官方认证"
+                    creator.verifyDesc.isNotBlank() -> creator.verifyDesc
+                    creator.fans >= 10000 -> "热门UP主 ($fansText 粉丝)"
+                    else -> "UP主 ($fansText 粉丝)"
+                }
+                biliCandidates.add(
+                    PredefinedChannel(
+                        platformType = PlatformType.BILIBILI,
+                        identifier = "UID: ${creator.mid}",
+                        title = "Bilibili (${creator.uname} · $fansText 粉丝)",
+                        feedPathOrUrl = "/bilibili/user/video/${creator.mid}",
+                        defaultSelected = idx == 0,
+                        probabilityNote = note
+                    )
                 )
-            )
-        }
-        if (biliCandidates.isEmpty()) {
+            }
+        } else {
             biliCandidates.add(
                 PredefinedChannel(
                     platformType = PlatformType.BILIBILI,
                     identifier = detectedName,
                     title = "Bilibili ($detectedName)",
                     feedPathOrUrl = "/bilibili/user/video/$detectedName",
-                    defaultSelected = true,
-                    probabilityNote = "名称检索"
+                    defaultSelected = false,
+                    probabilityNote = "B站未检索到官方认证账号 (可能未开设)"
                 )
             )
         }
-        candidateGroups.add(PlatformCandidateGroup(PlatformType.BILIBILI, biliCandidates, 0, true))
+        candidateGroups.add(PlatformCandidateGroup(PlatformType.BILIBILI, biliCandidates, 0, isEnabled = hasBili))
 
         // (3) Steam 游戏官方公告（若定位到 Steam App）
         if (detectedSteamAppId != null) {
@@ -274,21 +286,31 @@ object OnlineEntityLocator {
         }
 
         // (4) YouTube 分组
-        val ytCandidates = mutableListOf<PredefinedChannel>()
-        discoveredYouTubeChannels.distinctBy { it.first.lowercase() }.forEachIndexed { idx, (channelName, note) ->
+        val verifiedYouTube = mutableListOf<Pair<String, String>>()
+        for ((channelName, note) in discoveredYouTubeChannels.distinctBy { it.first.lowercase() }) {
             val clean = channelName.removePrefix("@")
-            ytCandidates.add(
-                PredefinedChannel(
-                    platformType = PlatformType.YOUTUBE,
-                    identifier = "@$clean",
-                    title = "YouTube (@$clean)",
-                    feedPathOrUrl = "/youtube/user/@$clean",
-                    defaultSelected = idx == 0,
-                    probabilityNote = note
-                )
-            )
+            if (YouTubeResolver.checkHandleExists(clean, client)) {
+                verifiedYouTube.add(clean to note)
+            } else {
+                AppLogger.i("OnlineEntityLocator", "过滤不存在的 YouTube 频道: @$clean (HTTP 404)")
+            }
         }
-        if (ytCandidates.isEmpty()) {
+        val ytCandidates = mutableListOf<PredefinedChannel>()
+        val hasYt = verifiedYouTube.isNotEmpty()
+        if (hasYt) {
+            verifiedYouTube.forEachIndexed { idx, (clean, note) ->
+                ytCandidates.add(
+                    PredefinedChannel(
+                        platformType = PlatformType.YOUTUBE,
+                        identifier = "@$clean",
+                        title = "YouTube (@$clean)",
+                        feedPathOrUrl = "/youtube/user/@$clean",
+                        defaultSelected = idx == 0,
+                        probabilityNote = note
+                    )
+                )
+            }
+        } else {
             val ytName = (detectedOriginalName ?: detectedName).replace("\\s+".toRegex(), "")
             ytCandidates.add(
                 PredefinedChannel(
@@ -297,11 +319,11 @@ object OnlineEntityLocator {
                     title = "YouTube (@$ytName)",
                     feedPathOrUrl = "/youtube/user/@$ytName",
                     defaultSelected = false,
-                    probabilityNote = "频道检索"
+                    probabilityNote = "未在YouTube检索到官方频道 (可能未开设)"
                 )
             )
         }
-        candidateGroups.add(PlatformCandidateGroup(PlatformType.YOUTUBE, ytCandidates, 0, true))
+        candidateGroups.add(PlatformCandidateGroup(PlatformType.YOUTUBE, ytCandidates, 0, isEnabled = hasYt))
 
         // (5) 官方网站 / 开发博客
         val siteUrl = discoveredOfficialLinks.firstOrNull() ?: detectedOfficialSite

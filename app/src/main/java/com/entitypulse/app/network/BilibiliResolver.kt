@@ -110,9 +110,12 @@ object BilibiliResolver {
                 val bestMid = creators.first().mid
                 AppLogger.i("BilibiliResolver", "成功解析 [$target] 的 B 站 UID 为: $bestMid (${creators.first().uname})")
                 return "/bilibili/user/video/$bestMid"
+            } else {
+                throw IllegalStateException("B站未检索到名为【$target】的认证 UP 主或官方账号。该主体可能未在 B 站开设独立账号，建议在【主体详情】中修改或删除该渠道。")
             }
         } catch (e: Exception) {
             AppLogger.w("BilibiliResolver", "解析 B 站 UID 失败: ${e.message}")
+            if (e is IllegalStateException) throw e
         }
         return path
     }

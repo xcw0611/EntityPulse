@@ -21,6 +21,28 @@ object YouTubeResolver {
     }
 
     /**
+     * 快速验证 YouTube 频道 Handle 是否真实存在（通过轻量 HEAD 请求）
+     */
+    fun checkHandleExists(handle: String, client: OkHttpClient): Boolean {
+        val clean = handle.trim().removePrefix("@")
+        if (clean.isBlank()) return false
+        val url = "https://www.youtube.com/@$clean"
+        val request = Request.Builder()
+            .url(url)
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+            .header("Accept-Language", "en-US,en;q=0.9")
+            .head()
+            .build()
+        return try {
+            client.newCall(request).execute().use { response ->
+                response.code != 404
+            }
+        } catch (_: Exception) {
+            true
+        }
+    }
+
+    /**
      * 将任何 YouTube 渠道标识（如 /youtube/user/@TeamCherry、@TeamCherry、Channel URL）
      * 解析为 YouTube 原生官方 Atom XML 订阅链接：
      * https://www.youtube.com/feeds/videos.xml?channel_id=UC...
@@ -70,7 +92,7 @@ object YouTubeResolver {
 
         client.newCall(request).execute().use { response ->
             if (response.code == 404) {
-                throw IllegalStateException("未找到 YouTube 频道 $handle (HTTP 404)。创作者可能使用了不同的工作室或独立频道 Handle（例如 @SpindleHorse），请确认 Handle 后重试")
+                throw IllegalStateException("YouTube 上不存在该频道 (@$handle) [HTTP 404]。该主体可能未在 YouTube 开设独立频道，或视频发布在制作团队/创作者频道中（例如 Hazbin Hotel 的官方视频统一发布在 @SpindleHorse 频道）。建议在【主体详情】中修改或删除此渠道。")
             }
             if (!response.isSuccessful) {
                 throw IllegalStateException("YouTube 频道页面请求失败: HTTP ${response.code} ${response.message}")

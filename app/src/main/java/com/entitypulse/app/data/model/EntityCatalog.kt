@@ -287,38 +287,41 @@ object EntityCatalog {
         // (1) X / Twitter 候选组
         val twitterCandidates = mutableListOf<PredefinedChannel>()
         val twOnline = onlineAdditions.filter { it.platformType == PlatformType.TWITTER }
-        if (twOnline.isNotEmpty()) {
+        val hasTw = twOnline.isNotEmpty()
+        if (hasTw) {
             twitterCandidates.addAll(twOnline)
         } else {
             twitterCandidates.add(
-                PredefinedChannel(PlatformType.TWITTER, "@$clean", "X / Twitter (@$clean)", "/twitter/user/$clean", true, "标准账号")
+                PredefinedChannel(PlatformType.TWITTER, "@$clean", "X / Twitter (@$clean)", "/twitter/user/$clean", false, "未在推特检索到官方账号 (可能未开设)")
             )
         }
-        groups.add(PlatformCandidateGroup(PlatformType.TWITTER, twitterCandidates, 0, true))
+        groups.add(PlatformCandidateGroup(PlatformType.TWITTER, twitterCandidates, 0, isEnabled = hasTw))
 
         // (2) Bilibili 候选组
         val biliCandidates = mutableListOf<PredefinedChannel>()
         val biliOnline = onlineAdditions.filter { it.platformType == PlatformType.BILIBILI }
-        if (biliOnline.isNotEmpty()) {
+        val hasBili = biliOnline.isNotEmpty()
+        if (hasBili) {
             biliCandidates.addAll(biliOnline)
         } else {
             biliCandidates.add(
-                PredefinedChannel(PlatformType.BILIBILI, trimmed, "Bilibili ($trimmed)", "/bilibili/user/video/$trimmed", true, "原名检索")
+                PredefinedChannel(PlatformType.BILIBILI, trimmed, "Bilibili ($trimmed)", "/bilibili/user/video/$trimmed", false, "B站未检索到官方认证账号 (可能未开设)")
             )
         }
-        groups.add(PlatformCandidateGroup(PlatformType.BILIBILI, biliCandidates, 0, true))
+        groups.add(PlatformCandidateGroup(PlatformType.BILIBILI, biliCandidates, 0, isEnabled = hasBili))
 
         // (3) YouTube 候选组
         val ytCandidates = mutableListOf<PredefinedChannel>()
         val ytOnline = onlineAdditions.filter { it.platformType == PlatformType.YOUTUBE }
-        if (ytOnline.isNotEmpty()) {
+        val hasYt = ytOnline.isNotEmpty()
+        if (hasYt) {
             ytCandidates.addAll(ytOnline)
         } else {
             ytCandidates.add(
-                PredefinedChannel(PlatformType.YOUTUBE, "@$clean", "YouTube (@$clean)", "/youtube/user/@$clean", false, "标准频道")
+                PredefinedChannel(PlatformType.YOUTUBE, "@$clean", "YouTube (@$clean)", "/youtube/user/@$clean", false, "未在YouTube检索到官方频道 (可能未开设)")
             )
         }
-        groups.add(PlatformCandidateGroup(PlatformType.YOUTUBE, ytCandidates, 0, true))
+        groups.add(PlatformCandidateGroup(PlatformType.YOUTUBE, ytCandidates, 0, isEnabled = hasYt))
 
         // (4) Steam 候选组 (仅当有检测到 Steam 项目时默认呈现)
         val steamOnline = onlineAdditions.filter { it.platformType == PlatformType.STEAM }
