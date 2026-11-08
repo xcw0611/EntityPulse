@@ -29,8 +29,8 @@ compose.desktop {
         nativeDistributions {
             packageName = "EntityPulse"
             packageVersion = "1.0.0"
-            description = "EntityPulse - 全网社媒与动态聚合 (PC桌面端)"
-            copyright = "© 2026 EntityPulse"
+            description = "EntityPulse - Social Media & Feed Aggregator (PC Desktop)"
+            copyright = "Copyright (c) 2026 EntityPulse"
             vendor = "EntityPulse"
 
             modules("java.base", "java.desktop", "java.sql", "java.naming", "java.management", "java.security.jgss", "java.instrument", "jdk.unsupported")
