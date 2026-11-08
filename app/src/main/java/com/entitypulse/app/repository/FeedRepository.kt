@@ -151,6 +151,10 @@ class FeedRepository(
      * 测试指定的订阅源，返回抓取到的最新一条动态预览，若失败则抛出包含诊断建议的异常。
      */
     suspend fun testChannel(feedPathOrUrl: String): ParsedFeedItem = withContext(Dispatchers.IO) {
+        val trimmed = feedPathOrUrl.trim()
+        if (trimmed.isBlank() || trimmed.endsWith("/none", ignoreCase = true) || trimmed == "未收录") {
+            throw IllegalStateException("该平台未收录独立官方账号或未配置有效订阅地址，无法测试连通性。")
+        }
         val parsed = fetchFeed(feedPathOrUrl)
         if (parsed.items.isEmpty()) {
             throw IllegalStateException("连接成功，但该频道近期未发布任何公开动态")
@@ -164,6 +168,13 @@ class FeedRepository(
     suspend fun syncChannel(channel: SourceChannelRecord): List<FeedItemRecord> = withContext(Dispatchers.IO) {
         val newSavedItems = mutableListOf<FeedItemRecord>()
         AppLogger.i("SyncEngine", "开始同步频道: ${channel.title} (ID=${channel.id}, URL=${channel.resolvedFeedUrl})")
+        val feedUrl = channel.resolvedFeedUrl.trim()
+        if (feedUrl.isBlank() || feedUrl.endsWith("/none", ignoreCase = true) || channel.identifier == "未收录") {
+            val skippedMsg = "未配置有效订阅地址或未收录独立官方账号"
+            AppLogger.i("SyncEngine", "频道 [${channel.title}] 跳过同步: $skippedMsg")
+            channelDao.updateSyncStatus(channel.id, System.currentTimeMillis(), skippedMsg)
+            return@withContext emptyList()
+        }
         try {
             val parsedFeed = fetchFeed(channel.resolvedFeedUrl)
 
@@ -218,26 +229,31 @@ class FeedRepository(
     }
 
     private suspend fun fetchFeed(feedPathOrUrl: String): ParsedFeed = withContext(Dispatchers.IO) {
+        val cleanTarget = feedPathOrUrl.trim()
+        if (cleanTarget.isBlank() || cleanTarget.endsWith("/none", ignoreCase = true) || cleanTarget == "未收录") {
+            throw IllegalStateException("未配置有效订阅地址或未收录独立官方账号")
+        }
+
         // 1. YouTube 原生官方 Atom XML 订阅抓取（彻底摆脱公共 RSSHub 节点 403 阻断）
-        if (YouTubeResolver.isYouTubeTarget(feedPathOrUrl)) {
+        if (YouTubeResolver.isYouTubeTarget(cleanTarget)) {
             try {
-                val nativeRssUrl = YouTubeResolver.resolveToNativeRssUrl(feedPathOrUrl, getHttpClient())
+                val nativeRssUrl = YouTubeResolver.resolveToNativeRssUrl(cleanTarget, getHttpClient())
                 AppLogger.i("FeedRepository", "YouTube 渠道已解析为官方原生 Atom RSS: $nativeRssUrl")
                 val xml = executeRequest(nativeRssUrl)
                 return@withContext FeedParser.parse(xml)
             } catch (e: Exception) {
                 AppLogger.e("FeedRepository", "YouTube 原生抓取异常: ${e.message}", e)
-                throw diagnoseNetworkError(e, feedPathOrUrl)
+                throw diagnoseNetworkError(e, cleanTarget)
             }
         }
 
         // 2. 若为 Twitter / X，优先调用官方 Syndication 接口免登录抓取
-        val isTwitter = feedPathOrUrl.startsWith("/twitter/user/", ignoreCase = true) ||
-                feedPathOrUrl.contains("twitter.com", ignoreCase = true) ||
-                feedPathOrUrl.contains("x.com", ignoreCase = true)
+        val isTwitter = cleanTarget.startsWith("/twitter/user/", ignoreCase = true) ||
+                cleanTarget.contains("twitter.com", ignoreCase = true) ||
+                cleanTarget.contains("x.com", ignoreCase = true)
 
         if (isTwitter) {
-            val username = extractTwitterUsername(feedPathOrUrl)
+            val username = extractTwitterUsername(cleanTarget)
             if (username.isNotBlank()) {
                 try {
                     return@withContext TwitterSyndicationParser.fetchTimeline(username, getHttpClient())
@@ -253,7 +269,7 @@ class FeedRepository(
         }
 
         // 3. Bilibili 动态/视频：若传入的是非数字关键词，自动联网解析为数字 UID
-        var resolvedPath = feedPathOrUrl
+        var resolvedPath = cleanTarget
         if (resolvedPath.startsWith("/bilibili/user/video/", ignoreCase = true)) {
             resolvedPath = BilibiliResolver.resolveNumericFeedPath(resolvedPath, getHttpClient())
         }
@@ -404,7 +420,9 @@ class FeedRepository(
             msg.contains("未在") ||
             msg.contains("未发布任何公开动态") ||
             msg.contains("已注销") ||
-            msg.contains("冻结")
+            msg.contains("冻结") ||
+            msg.contains("未收录") ||
+            msg.contains("未配置有效订阅地址")
         ) {
             return if (e is Exception) e else IllegalStateException(msg, e)
         }

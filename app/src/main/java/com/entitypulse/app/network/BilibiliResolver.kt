@@ -89,6 +89,46 @@ object BilibiliResolver {
     }
 
     /**
+     * 根据 UID 获取指定 B 站创作者信息
+     */
+    fun getCreatorByUid(mid: Long, client: OkHttpClient): BilibiliCreator? {
+        val url = "https://api.bilibili.com/x/space/acc/info?mid=$mid"
+        val request = Request.Builder()
+            .url(url)
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+            .header("Referer", "https://space.bilibili.com/$mid")
+            .build()
+        return try {
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return null
+                val body = response.body?.string() ?: return null
+                val root = JSONObject(body)
+                if (root.optInt("code", -1) != 0) return null
+                val data = root.optJSONObject("data") ?: return null
+                val uname = data.optString("name", "")
+                val sign = data.optString("sign", "")
+                var face = data.optString("face", "")
+                if (face.startsWith("//")) face = "https:$face"
+                val official = data.optJSONObject("official")
+                val isOfficial = (official?.optInt("role", -1) ?: -1) > 0
+                val title = official?.optString("title", "") ?: ""
+                BilibiliCreator(
+                    mid = mid,
+                    uname = uname,
+                    sign = sign,
+                    fans = 0L,
+                    videos = 0,
+                    avatarUrl = face,
+                    isOfficial = isOfficial,
+                    verifyDesc = title
+                )
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /**
      * 如果用户输入的 B 站路径是 /bilibili/user/video/文本关键词，
      * 自动尝试将其解析为实际的数字 UID
      */

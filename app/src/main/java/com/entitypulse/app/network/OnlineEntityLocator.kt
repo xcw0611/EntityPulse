@@ -27,23 +27,43 @@ data class IpLocateResult(
 
 object OnlineEntityLocator {
 
-    private val twitterPattern = Pattern.compile("https?://(?:twitter|x)\\.com/([a-zA-Z0-9_]{3,25})", Pattern.CASE_INSENSITIVE)
+    private val twitterPattern = Pattern.compile("https?://(?:twitter|x)\\.com/([a-zA-Z0-9_]{3,30})", Pattern.CASE_INSENSITIVE)
     private val youtubePattern = Pattern.compile("https?://(?:www\\.)?youtube\\.com/(?:@|user/|c/)?([a-zA-Z0-9_.-]{3,35})", Pattern.CASE_INSENSITIVE)
+    private val bilibiliSpacePattern = Pattern.compile("space\\.bilibili\\.com/(\\d+)", Pattern.CASE_INSENSITIVE)
 
     private val IGNORED_TWITTER_HANDLES = setOf(
         "intent", "share", "home", "hashtag", "login", "search", "i", "settings",
-        "privacy", "tos", "explore", "about", "help", "download", "signup", "jobs"
+        "privacy", "tos", "explore", "about", "help", "download", "signup", "jobs", "status"
     )
 
     private val IGNORED_YOUTUBE_HANDLES = setOf(
         "watch", "embed", "results", "channel", "playlist", "feed", "live", "about"
     )
 
+    data class WebSocialLinks(
+        val twitterHandles: List<String> = emptyList(),
+        val youtubeChannels: List<String> = emptyList(),
+        val bilibiliUids: List<Long> = emptyList(),
+        val relatedSites: List<String> = emptyList()
+    )
+
+    private data class WikiResult(
+        val title: String,
+        val extract: String,
+        val romajiOrEnglishName: String,
+        val wikibaseItem: String? = null,
+        val imageUrl: String? = null,
+        val twitterHandles: List<String> = emptyList(),
+        val youtubeHandles: List<String> = emptyList(),
+        val bilibiliUids: List<Long> = emptyList(),
+        val officialSites: List<String> = emptyList()
+    )
+
     /**
      * 针对用户输入的内容：
-     * 1. 优先定位其所属的 动漫IP、游戏IP、工作室或创作者实体（通过 Bangumi、Steam、Wikipedia 等知识网络）
-     * 2. 针对该定位到的 IP，通过全网检索（官方外链、知识图谱、B站/DDG联想）精准提取其真实社媒账号，
-     *    彻底摒弃死板机械的关键词词尾衍生。
+     * 1. 优先定位其所属的 动漫IP、游戏IP、工作室或创作者实体（通过 Bangumi、Steam、萌娘百科、Wikipedia 等知识网络）
+     * 2. 针对该定位到的 IP，利用全网已知权威资源（维基百科、萌娘百科、Wikidata 关系图谱、官方/制作方站点社交直链）
+     *    挖掘其真实且经权威认证的社媒账号，彻底杜绝凭空臆测同名账号与死板机械的字符串拼凑。
      */
     suspend fun locateIpAndSocialChannels(
         query: String,
@@ -86,10 +106,11 @@ object OnlineEntityLocator {
         var detectedOfficialSite: String? = null
         var detectedSteamAppId: Int? = null
         var detectedSteamGameName: String? = null
+        var detectedWikibaseItem: String? = null
 
         val discoveredTwitterHandles = mutableListOf<Pair<String, String>>() // Handle to Note
-        val discoveredYouTubeChannels = mutableListOf<Pair<String, String>>()
-        val discoveredBilibiliCreators = mutableListOf<BilibiliResolver.BilibiliCreator>()
+        val discoveredYouTubeChannels = mutableListOf<Pair<String, String>>() // Channel/Handle to Note
+        val discoveredBilibiliUids = mutableListOf<Pair<Long, String>>() // UID to Note
         val discoveredOfficialLinks = mutableListOf<String>()
 
         // 2. 尝试探测 Steam 游戏 IP
@@ -128,9 +149,23 @@ object OnlineEntityLocator {
             }
         } catch (_: Exception) {}
 
-        // 4. 尝试 Wikipedia 维基百科知识图谱与官方链接检索 (挖掘最准确的官方 X/Twitter 与官网)
+        // 4. 尝试萌娘百科 (Moegirlpedia) 检索（国内超全 ACG/动画/创作者外链与官方网站）
         try {
-            val wikiResult = queryWikipedia(trimmed, client)
+            val moegirlResult = queryMoegirlpedia(detectedName, client) ?: queryMoegirlpedia(trimmed, client)
+            if (moegirlResult != null) {
+                if (detectedBio.isNullOrBlank() && moegirlResult.extract.isNotBlank()) {
+                    detectedBio = moegirlResult.extract
+                }
+                moegirlResult.twitterHandles.forEach { discoveredTwitterHandles.add(it to "萌百官方收录") }
+                moegirlResult.youtubeHandles.forEach { discoveredYouTubeChannels.add(it to "萌百官方收录") }
+                moegirlResult.bilibiliUids.forEach { discoveredBilibiliUids.add(it to "萌百官方收录") }
+                discoveredOfficialLinks.addAll(moegirlResult.officialSites)
+            }
+        } catch (_: Exception) {}
+
+        // 5. 尝试 Wikipedia 维基百科知识图谱与官方链接检索 (挖掘最准确的官方 X/Twitter 与官网)
+        try {
+            val wikiResult = queryWikipedia(detectedName, client) ?: queryWikipedia(trimmed, client)
             if (wikiResult != null) {
                 if (detectedBio.isNullOrBlank() && wikiResult.extract.isNotBlank()) {
                     detectedBio = wikiResult.extract
@@ -141,47 +176,81 @@ object OnlineEntityLocator {
                 if (detectedAvatar.isNullOrBlank() && wikiResult.imageUrl != null) {
                     detectedAvatar = wikiResult.imageUrl
                 }
-                wikiResult.twitterHandles.forEach { handle ->
-                    discoveredTwitterHandles.add(handle to "维基官方直链")
-                }
-                wikiResult.youtubeHandles.forEach { yt ->
-                    discoveredYouTubeChannels.add(yt to "维基官方直链")
-                }
-                wikiResult.officialSites.forEach { site ->
-                    discoveredOfficialLinks.add(site)
-                }
+                detectedWikibaseItem = wikiResult.wikibaseItem
+
+                wikiResult.twitterHandles.forEach { discoveredTwitterHandles.add(it to "维基官方直链") }
+                wikiResult.youtubeHandles.forEach { discoveredYouTubeChannels.add(it to "维基官方直链") }
+                wikiResult.bilibiliUids.forEach { discoveredBilibiliUids.add(it to "维基官方直链") }
+                discoveredOfficialLinks.addAll(wikiResult.officialSites)
             }
         } catch (_: Exception) {}
 
-        // 5. 针对该 IP 进行 Bilibili 官方 / 认证账号针对性检索（直接获取真实 UID 与粉丝数）
-        try {
-            val creators = BilibiliResolver.searchCreators(detectedName, client)
-            discoveredBilibiliCreators.addAll(creators)
-            if (discoveredBilibiliCreators.isEmpty() && !detectedOriginalName.isNullOrBlank()) {
-                val moreCreators = BilibiliResolver.searchCreators(detectedOriginalName, client)
-                discoveredBilibiliCreators.addAll(moreCreators)
-            }
-        } catch (_: Exception) {}
-
-        // 6. 若 X/Twitter 尚未通过官网抓到，使用定位到的英文/原名向 DuckDuckGo 联想探测
-        if (discoveredTwitterHandles.isEmpty()) {
-            val searchKey = detectedOriginalName?.takeIf { it.isNotBlank() } ?: detectedName
+        // 6. 若存在英文原名，检索英文维基百科 (获取更全面的海外官方社交媒体条目)
+        val enName = detectedOriginalName?.takeIf { it.isNotBlank() }
+        if (!enName.isNullOrBlank()) {
             try {
-                val ddgTw = fetchDuckDuckGoSuggestions("$searchKey twitter", client)
-                for (term in ddgTw) {
-                    val cleanTerm = term.replace("twitter", "", ignoreCase = true)
-                        .replace("account", "", ignoreCase = true)
-                        .replace("official", "Official", ignoreCase = true)
-                        .trim()
-                    val handle = cleanTerm.replace("\\s+".toRegex(), "")
-                    if (handle.length in 3..25 && !IGNORED_TWITTER_HANDLES.contains(handle.lowercase())) {
-                        discoveredTwitterHandles.add(handle to "全网定位检索")
-                    }
+                val enWikiResult = queryEnglishWikipedia(enName, client)
+                if (enWikiResult != null) {
+                    enWikiResult.twitterHandles.forEach { discoveredTwitterHandles.add(it to "英文维基收录") }
+                    enWikiResult.youtubeHandles.forEach { discoveredYouTubeChannels.add(it to "英文维基收录") }
+                    enWikiResult.bilibiliUids.forEach { discoveredBilibiliUids.add(it to "英文维基收录") }
+                    discoveredOfficialLinks.addAll(enWikiResult.officialSites)
                 }
             } catch (_: Exception) {}
         }
 
-        // 7. 组装多平台真实候选卡片（严格预检验真实性，未开设账号的平台默认不勾选）
+        // 7. 若定位到 Wikidata 实体（QID），提取结构化属性（包括其制作公司与创作者的主页与频道）
+        val qid = detectedWikibaseItem
+        if (!qid.isNullOrBlank()) {
+            try {
+                val wdLinks = queryWikidata(qid, client)
+                wdLinks.twitterHandles.forEach { discoveredTwitterHandles.add(it to "知识图谱认证") }
+                wdLinks.youtubeChannels.forEach { discoveredYouTubeChannels.add(it to "知识图谱认证") }
+                wdLinks.bilibiliUids.forEach { discoveredBilibiliUids.add(it to "知识图谱认证") }
+                discoveredOfficialLinks.addAll(wdLinks.relatedSites)
+            } catch (_: Exception) {}
+        }
+
+        // 8. 深度遍历官网与制作方站点，提取官网页脚与导航中的官方社交账号直链
+        val siteUrl = discoveredOfficialLinks.firstOrNull() ?: detectedOfficialSite
+        if (discoveredOfficialLinks.isNotEmpty()) {
+            for (site in discoveredOfficialLinks.distinct().take(4)) {
+                try {
+                    val siteSocial = scrapeSocialLinksFromWebsite(site, client)
+                    siteSocial.twitterHandles.forEach { discoveredTwitterHandles.add(it to "官网认证直链") }
+                    siteSocial.youtubeChannels.forEach { discoveredYouTubeChannels.add(it to "制作方官网频道") }
+                    siteSocial.bilibiliUids.forEach { discoveredBilibiliUids.add(it to "官网认证B站") }
+                } catch (_: Exception) {}
+            }
+        }
+
+        // 9. 针对 Bilibili 平台进行精准官方认证过滤
+        val discoveredBilibiliCreators = mutableListOf<BilibiliResolver.BilibiliCreator>()
+        // (a) 首先注入权威资料中提取到的 B 站 UID
+        for ((biliUid, note) in discoveredBilibiliUids.distinctBy { it.first }) {
+            try {
+                val creator = BilibiliResolver.getCreatorByUid(biliUid, client)
+                if (creator != null) {
+                    discoveredBilibiliCreators.add(creator)
+                }
+            } catch (_: Exception) {}
+        }
+        // (b) 若未在权威资料中收录，检索 B 站搜索接口，严格仅采纳官方认证或高契合度 UP 主
+        if (discoveredBilibiliCreators.isEmpty()) {
+            try {
+                val creators = BilibiliResolver.searchCreators(detectedName, client)
+                val matched = creators.filter { c ->
+                    c.isOfficial ||
+                            c.uname.contains("官方") ||
+                            c.uname.contains("动画") ||
+                            c.uname.contains("手游") ||
+                            (c.fans >= 30000 && c.uname.equals(detectedName, ignoreCase = true))
+                }
+                discoveredBilibiliCreators.addAll(matched)
+            } catch (_: Exception) {}
+        }
+
+        // 10. 社交媒体账号存在性与真实性匹配校验 (验证从权威资料获取的账号)
         val candidateGroups = mutableListOf<PlatformCandidateGroup>()
 
         // (1) X / Twitter 分组
@@ -194,8 +263,7 @@ object OnlineEntityLocator {
             }
         }
         val twCandidates = mutableListOf<PredefinedChannel>()
-        val hasTw = verifiedTwitter.isNotEmpty()
-        if (hasTw) {
+        if (verifiedTwitter.isNotEmpty()) {
             verifiedTwitter.forEachIndexed { idx, (handle, note) ->
                 twCandidates.add(
                     PredefinedChannel(
@@ -208,25 +276,65 @@ object OnlineEntityLocator {
                     )
                 )
             }
+            candidateGroups.add(PlatformCandidateGroup(PlatformType.TWITTER, twCandidates, 0, isEnabled = true))
         } else {
-            val fallbackHandle = (detectedOriginalName ?: detectedName).replace("\\s+".toRegex(), "")
+            // 未在权威网络资料中收录官方账号：明确提示用户，且默认禁用该渠道，彻底避免臆测假账号导致同步报错
             twCandidates.add(
                 PredefinedChannel(
                     platformType = PlatformType.TWITTER,
-                    identifier = "@$fallbackHandle",
-                    title = "X / Twitter (@$fallbackHandle)",
-                    feedPathOrUrl = "/twitter/user/$fallbackHandle",
+                    identifier = "未收录",
+                    title = "X / Twitter (网络资料未收录独立官方账号)",
+                    feedPathOrUrl = "",
                     defaultSelected = false,
-                    probabilityNote = "未在推特检索到官方账号 (可能未开设)"
+                    probabilityNote = "未发现独立官方推特 (可能未开设或由发行方代发)"
                 )
             )
+            candidateGroups.add(PlatformCandidateGroup(PlatformType.TWITTER, twCandidates, 0, isEnabled = false))
         }
-        candidateGroups.add(PlatformCandidateGroup(PlatformType.TWITTER, twCandidates, 0, isEnabled = hasTw))
 
-        // (2) Bilibili 分组
+        // (2) YouTube 分组
+        val verifiedYouTube = mutableListOf<Pair<String, String>>()
+        for ((channelName, note) in discoveredYouTubeChannels.distinctBy { it.first.lowercase() }) {
+            val clean = channelName.removePrefix("@")
+            if (YouTubeResolver.checkHandleExists(clean, client)) {
+                verifiedYouTube.add(clean to note)
+            } else {
+                AppLogger.i("OnlineEntityLocator", "过滤不存在的 YouTube 频道: @$clean (HTTP 404)")
+            }
+        }
+        val ytCandidates = mutableListOf<PredefinedChannel>()
+        if (verifiedYouTube.isNotEmpty()) {
+            verifiedYouTube.forEachIndexed { idx, (clean, note) ->
+                ytCandidates.add(
+                    PredefinedChannel(
+                        platformType = PlatformType.YOUTUBE,
+                        identifier = "@$clean",
+                        title = "YouTube (@$clean)",
+                        feedPathOrUrl = "/youtube/user/@$clean",
+                        defaultSelected = idx == 0,
+                        probabilityNote = note
+                    )
+                )
+            }
+            candidateGroups.add(PlatformCandidateGroup(PlatformType.YOUTUBE, ytCandidates, 0, isEnabled = true))
+        } else {
+            // 未在权威网络资料中收录官方频道：明确提示用户，且默认禁用该渠道
+            ytCandidates.add(
+                PredefinedChannel(
+                    platformType = PlatformType.YOUTUBE,
+                    identifier = "未收录",
+                    title = "YouTube (网络资料未收录独立官方频道)",
+                    feedPathOrUrl = "",
+                    defaultSelected = false,
+                    probabilityNote = "未发现独立官方频道 (视频可能在制作方或主创频道发布)"
+                )
+            )
+            candidateGroups.add(PlatformCandidateGroup(PlatformType.YOUTUBE, ytCandidates, 0, isEnabled = false))
+        }
+
+        // (3) Bilibili 分组
         val biliCandidates = mutableListOf<PredefinedChannel>()
-        val hasBili = discoveredBilibiliCreators.isNotEmpty()
-        if (hasBili) {
+        if (discoveredBilibiliCreators.isNotEmpty()) {
             discoveredBilibiliCreators.distinctBy { it.mid }.forEachIndexed { idx, creator ->
                 val fansText = when {
                     creator.fans >= 10000 -> "${creator.fans / 10000}.${(creator.fans % 10000) / 1000}万"
@@ -249,21 +357,23 @@ object OnlineEntityLocator {
                     )
                 )
             }
+            candidateGroups.add(PlatformCandidateGroup(PlatformType.BILIBILI, biliCandidates, 0, isEnabled = true))
         } else {
+            // 未在权威网络资料中收录官方账号：明确提示用户，且默认禁用该渠道
             biliCandidates.add(
                 PredefinedChannel(
                     platformType = PlatformType.BILIBILI,
-                    identifier = detectedName,
-                    title = "Bilibili ($detectedName)",
-                    feedPathOrUrl = "/bilibili/user/video/$detectedName",
+                    identifier = "未收录",
+                    title = "Bilibili (网络资料未收录B站官方号)",
+                    feedPathOrUrl = "",
                     defaultSelected = false,
-                    probabilityNote = "B站未检索到官方认证账号 (可能未开设)"
+                    probabilityNote = "该作品暂未在B站设立官方认证账号"
                 )
             )
+            candidateGroups.add(PlatformCandidateGroup(PlatformType.BILIBILI, biliCandidates, 0, isEnabled = false))
         }
-        candidateGroups.add(PlatformCandidateGroup(PlatformType.BILIBILI, biliCandidates, 0, isEnabled = hasBili))
 
-        // (3) Steam 游戏官方公告（若定位到 Steam App）
+        // (4) Steam 游戏官方公告（若定位到 Steam App）
         if (detectedSteamAppId != null) {
             val appId = detectedSteamAppId
             val gName = detectedSteamGameName ?: detectedName
@@ -286,48 +396,7 @@ object OnlineEntityLocator {
             )
         }
 
-        // (4) YouTube 分组
-        val verifiedYouTube = mutableListOf<Pair<String, String>>()
-        for ((channelName, note) in discoveredYouTubeChannels.distinctBy { it.first.lowercase() }) {
-            val clean = channelName.removePrefix("@")
-            if (YouTubeResolver.checkHandleExists(clean, client)) {
-                verifiedYouTube.add(clean to note)
-            } else {
-                AppLogger.i("OnlineEntityLocator", "过滤不存在的 YouTube 频道: @$clean (HTTP 404)")
-            }
-        }
-        val ytCandidates = mutableListOf<PredefinedChannel>()
-        val hasYt = verifiedYouTube.isNotEmpty()
-        if (hasYt) {
-            verifiedYouTube.forEachIndexed { idx, (clean, note) ->
-                ytCandidates.add(
-                    PredefinedChannel(
-                        platformType = PlatformType.YOUTUBE,
-                        identifier = "@$clean",
-                        title = "YouTube (@$clean)",
-                        feedPathOrUrl = "/youtube/user/@$clean",
-                        defaultSelected = idx == 0,
-                        probabilityNote = note
-                    )
-                )
-            }
-        } else {
-            val ytName = (detectedOriginalName ?: detectedName).replace("\\s+".toRegex(), "")
-            ytCandidates.add(
-                PredefinedChannel(
-                    platformType = PlatformType.YOUTUBE,
-                    identifier = "@$ytName",
-                    title = "YouTube (@$ytName)",
-                    feedPathOrUrl = "/youtube/user/@$ytName",
-                    defaultSelected = false,
-                    probabilityNote = "未在YouTube检索到官方频道 (可能未开设)"
-                )
-            )
-        }
-        candidateGroups.add(PlatformCandidateGroup(PlatformType.YOUTUBE, ytCandidates, 0, isEnabled = hasYt))
-
         // (5) 官方网站 / 开发博客
-        val siteUrl = discoveredOfficialLinks.firstOrNull() ?: detectedOfficialSite
         if (!siteUrl.isNullOrBlank()) {
             val domain = runCatching { URI(siteUrl).host }.getOrNull() ?: siteUrl
             candidateGroups.add(
@@ -349,7 +418,7 @@ object OnlineEntityLocator {
             )
         }
 
-        // (6) Reddit 社区专版
+        // (6) Reddit 社区讨论版块（仅作为社群补充，默认不作为主力消息源勾选）
         val redditName = (detectedOriginalName ?: detectedName).replace("[^a-zA-Z0-9]".toRegex(), "")
         if (redditName.length in 3..25) {
             candidateGroups.add(
@@ -360,9 +429,9 @@ object OnlineEntityLocator {
                             platformType = PlatformType.REDDIT,
                             identifier = "r/$redditName",
                             title = "Reddit (r/$redditName)",
-                            feedPathOrUrl = "https://www.reddit.com/r/$redditName/.rss",
+                            feedPathOrUrl = "/reddit/subreddit/$redditName",
                             defaultSelected = false,
-                            probabilityNote = "社区专版"
+                            probabilityNote = "粉丝社群专版 (非官方)"
                         )
                     ),
                     selectedIndex = 0,
@@ -429,8 +498,8 @@ object OnlineEntityLocator {
 
     private fun queryBangumiSubject(query: String, client: OkHttpClient): BangumiResult? {
         val encoded = URLEncoder.encode(query, "UTF-8")
-        val searchUrl = "https://api.bgm.tv/search/subject/$encoded?type=2"
-        val request = Request.Builder()
+        val searchUrl = "https://api.bgm.tv/search/subject/$encoded?type=2&responseGroup=small"
+        val searchReq = Request.Builder()
             .url(searchUrl)
             .header("User-Agent", "EntityPulse/1.0 (Android)")
             .build()
@@ -440,21 +509,20 @@ object OnlineEntityLocator {
         var cnName = ""
         var cover = ""
 
-        client.newCall(request).execute().use { response ->
+        client.newCall(searchReq).execute().use { response ->
             if (!response.isSuccessful) return null
             val body = response.body?.string() ?: return null
             val root = JSONObject(body)
             val list = root.optJSONArray("list") ?: return null
-            if (list.length() > 0) {
-                val item = list.optJSONObject(0) ?: return null
-                subjectId = item.optInt("id", 0)
-                origName = item.optString("name", "")
-                cnName = item.optString("name_cn", "")
-                cover = item.optJSONObject("images")?.optString("large", "") ?: ""
-            }
+            if (list.length() == 0) return null
+            val first = list.optJSONObject(0) ?: return null
+            subjectId = first.optInt("id", 0)
+            origName = first.optString("name", "")
+            cnName = first.optString("name_cn", "")
+            cover = first.optJSONObject("images")?.optString("large", "") ?: ""
         }
 
-        if (subjectId <= 0) return null
+        if (subjectId == 0) return null
 
         var summary = ""
         var officialSite: String? = null
@@ -487,15 +555,70 @@ object OnlineEntityLocator {
         return BangumiResult(origName, cnName, cover, summary, officialSite)
     }
 
-    private data class WikiResult(
-        val title: String,
-        val extract: String,
-        val romajiOrEnglishName: String,
-        val imageUrl: String?,
-        val twitterHandles: List<String>,
-        val youtubeHandles: List<String>,
-        val officialSites: List<String>
-    )
+    private fun queryMoegirlpedia(query: String, client: OkHttpClient): WikiResult? {
+        return try {
+            val encoded = URLEncoder.encode(query, "UTF-8")
+            val openSearchUrl = "https://zh.moegirl.org.cn/api.php?action=opensearch&search=$encoded&limit=2&format=json"
+            val osReq = Request.Builder().url(openSearchUrl).header("User-Agent", "Mozilla/5.0").build()
+
+            var articleTitle = query
+            client.newCall(osReq).execute().use { response ->
+                if (!response.isSuccessful) return null
+                val body = response.body?.string() ?: return null
+                val array = JSONArray(body)
+                if (array.length() >= 2) {
+                    val titles = array.getJSONArray(1)
+                    if (titles.length() > 0) {
+                        articleTitle = titles.optString(0, query)
+                    }
+                }
+            }
+
+            val encodedTitle = URLEncoder.encode(articleTitle, "UTF-8")
+            val queryUrl = "https://zh.moegirl.org.cn/api.php?action=query&titles=$encodedTitle&prop=extlinks|extracts|pageprops&ellimit=50&format=json&explaintext=1&exintro=1"
+            val qReq = Request.Builder().url(queryUrl).header("User-Agent", "Mozilla/5.0").build()
+
+            client.newCall(qReq).execute().use { response ->
+                if (!response.isSuccessful) return null
+                val body = response.body?.string() ?: return null
+                val root = JSONObject(body)
+                val pages = root.optJSONObject("query")?.optJSONObject("pages") ?: return null
+                val keys = pages.keys()
+                if (!keys.hasNext()) return null
+                val pageKey = keys.next()
+                if (pageKey == "-1") return null
+                val page = pages.optJSONObject(pageKey) ?: return null
+
+                val extract = page.optString("extract", "")
+                val extlinks = page.optJSONArray("extlinks")
+                val twHandles = mutableListOf<String>()
+                val ytHandles = mutableListOf<String>()
+                val biliUids = mutableListOf<Long>()
+                val sites = mutableListOf<String>()
+
+                if (extlinks != null) {
+                    for (i in 0 until extlinks.length()) {
+                        val link = extlinks.optJSONObject(i)?.optString("*", "") ?: continue
+                        parseExternalLink(link, twHandles, ytHandles, biliUids, sites)
+                    }
+                }
+
+                WikiResult(
+                    title = articleTitle,
+                    extract = extract,
+                    romajiOrEnglishName = "",
+                    wikibaseItem = null,
+                    imageUrl = null,
+                    twitterHandles = twHandles.distinct(),
+                    youtubeHandles = ytHandles.distinct(),
+                    bilibiliUids = biliUids.distinct(),
+                    officialSites = sites.distinct()
+                )
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
 
     private fun queryWikipedia(query: String, client: OkHttpClient): WikiResult? {
         val encoded = URLEncoder.encode(query, "UTF-8")
@@ -528,46 +651,23 @@ object OnlineEntityLocator {
             val keys = pages.keys()
             if (!keys.hasNext()) return null
             val pageKey = keys.next()
+            if (pageKey == "-1") return null
             val page = pages.optJSONObject(pageKey) ?: return null
 
             val extract = page.optString("extract", "")
             val defaultSort = page.optJSONObject("pageprops")?.optString("defaultsort", "") ?: ""
+            val wikibaseItem = page.optJSONObject("pageprops")?.optString("wikibase_item", null)
             val extlinks = page.optJSONArray("extlinks")
 
             val twHandles = mutableListOf<String>()
             val ytHandles = mutableListOf<String>()
+            val biliUids = mutableListOf<Long>()
             val sites = mutableListOf<String>()
 
             if (extlinks != null) {
                 for (i in 0 until extlinks.length()) {
                     val link = extlinks.optJSONObject(i)?.optString("*", "") ?: continue
-                    val twM = twitterPattern.matcher(link)
-                    if (twM.find()) {
-                        val handle = twM.group(1)
-                        if (!handle.isNullOrBlank() && !IGNORED_TWITTER_HANDLES.contains(handle.lowercase())) {
-                            twHandles.add(handle)
-                        }
-                    }
-
-                    val ytM = youtubePattern.matcher(link)
-                    if (ytM.find()) {
-                        val ch = ytM.group(1)
-                        if (!ch.isNullOrBlank() && !IGNORED_YOUTUBE_HANDLES.contains(ch.lowercase())) {
-                            ytHandles.add(ch)
-                        }
-                    }
-
-                    if (link.startsWith("http://") || link.startsWith("https://")) {
-                        val low = link.lowercase()
-                        if (!low.contains("wikipedia") && !low.contains("wikimedia") && !low.contains("google") &&
-                            !low.contains("archive.org") && !low.contains("twitter.com") && !low.contains("x.com") &&
-                            !low.contains("youtube.com") && !low.contains("facebook.com") && !low.contains("instagram.com") &&
-                            !low.contains("weibo.com") && !low.contains("bilibili.com") && !low.contains("natalie.mu") &&
-                            !low.contains("oricon.co.jp") && !low.contains("comicspace") && !low.contains("ddnavi")
-                        ) {
-                            sites.add(link)
-                        }
-                    }
+                    parseExternalLink(link, twHandles, ytHandles, biliUids, sites)
                 }
             }
 
@@ -575,38 +675,260 @@ object OnlineEntityLocator {
                 title = articleTitle,
                 extract = extract,
                 romajiOrEnglishName = defaultSort,
+                wikibaseItem = wikibaseItem,
                 imageUrl = null,
                 twitterHandles = twHandles.distinct(),
                 youtubeHandles = ytHandles.distinct(),
+                bilibiliUids = biliUids.distinct(),
                 officialSites = sites.distinct()
             )
         }
     }
 
-    private fun fetchDuckDuckGoSuggestions(query: String, client: OkHttpClient): List<String> {
-        val encoded = URLEncoder.encode(query, "UTF-8")
-        val url = "https://duckduckgo.com/ac/?q=$encoded&type=list"
-        val request = Request.Builder()
-            .url(url)
-            .header("User-Agent", "Mozilla/5.0")
-            .build()
+    private fun queryEnglishWikipedia(enTitle: String, client: OkHttpClient): WikiResult? {
+        try {
+            val encodedTitle = URLEncoder.encode(enTitle, "UTF-8")
+            val queryUrl = "https://en.wikipedia.org/w/api.php?action=query&titles=$encodedTitle&prop=extlinks&ellimit=50&format=json"
+            val req = Request.Builder().url(queryUrl).header("User-Agent", "Mozilla/5.0").build()
 
-        client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) return emptyList()
-            val body = response.body?.string() ?: return emptyList()
-            val array = JSONArray(body)
-            if (array.length() >= 2) {
-                val suggestions = array.getJSONArray(1)
-                val list = mutableListOf<String>()
-                for (i in 0 until suggestions.length()) {
-                    val s = suggestions.optString(i)
-                    if (s.isNotBlank()) list.add(s)
+            client.newCall(req).execute().use { response ->
+                if (!response.isSuccessful) return null
+                val body = response.body?.string() ?: return null
+                val root = JSONObject(body)
+                val pages = root.optJSONObject("query")?.optJSONObject("pages") ?: return null
+                val keys = pages.keys()
+                if (!keys.hasNext()) return null
+                val pageKey = keys.next()
+                if (pageKey == "-1") return null
+                val page = pages.optJSONObject(pageKey) ?: return null
+
+                val extlinks = page.optJSONArray("extlinks")
+                val twHandles = mutableListOf<String>()
+                val ytHandles = mutableListOf<String>()
+                val biliUids = mutableListOf<Long>()
+                val sites = mutableListOf<String>()
+
+                if (extlinks != null) {
+                    for (i in 0 until extlinks.length()) {
+                        val link = extlinks.optJSONObject(i)?.optString("*", "") ?: continue
+                        parseExternalLink(link, twHandles, ytHandles, biliUids, sites)
+                    }
                 }
-                return list
+
+                return WikiResult(
+                    title = enTitle,
+                    extract = "",
+                    romajiOrEnglishName = enTitle,
+                    wikibaseItem = null,
+                    imageUrl = null,
+                    twitterHandles = twHandles.distinct(),
+                    youtubeHandles = ytHandles.distinct(),
+                    bilibiliUids = biliUids.distinct(),
+                    officialSites = sites.distinct()
+                )
             }
+        } catch (_: Exception) {
+            return null
         }
-        return emptyList()
     }
 
+    private fun queryWikidata(qid: String, client: OkHttpClient): WebSocialLinks {
+        val twHandles = mutableListOf<String>()
+        val ytChannels = mutableListOf<String>()
+        val biliUids = mutableListOf<Long>()
+        val sites = mutableListOf<String>()
+        val relatedQids = mutableListOf<String>()
 
+        try {
+            val url = "https://www.wikidata.org/wiki/Special:EntityData/$qid.json"
+            val req = Request.Builder().url(url).header("User-Agent", "Mozilla/5.0").build()
+
+            client.newCall(req).execute().use { response ->
+                if (!response.isSuccessful) return WebSocialLinks()
+                val body = response.body?.string() ?: return WebSocialLinks()
+                val root = JSONObject(body)
+                val entities = root.optJSONObject("entities") ?: return WebSocialLinks()
+                val entity = entities.optJSONObject(qid) ?: return WebSocialLinks()
+                val claims = entity.optJSONObject("claims") ?: return WebSocialLinks()
+
+                claims.optJSONArray("P2002")?.let { pArr ->
+                    for (i in 0 until pArr.length()) {
+                        val v = pArr.optJSONObject(i)?.optJSONObject("mainsnak")?.optJSONObject("datavalue")?.optString("value")
+                        if (!v.isNullOrBlank()) twHandles.add(v)
+                    }
+                }
+
+                claims.optJSONArray("P2397")?.let { pArr ->
+                    for (i in 0 until pArr.length()) {
+                        val v = pArr.optJSONObject(i)?.optJSONObject("mainsnak")?.optJSONObject("datavalue")?.optString("value")
+                        if (!v.isNullOrBlank()) ytChannels.add(v)
+                    }
+                }
+
+                claims.optJSONArray("P6079")?.let { pArr ->
+                    for (i in 0 until pArr.length()) {
+                        val v = pArr.optJSONObject(i)?.optJSONObject("mainsnak")?.optJSONObject("datavalue")?.optLong("value", 0L) ?: 0L
+                        if (v > 0L) biliUids.add(v)
+                    }
+                }
+
+                claims.optJSONArray("P856")?.let { pArr ->
+                    for (i in 0 until pArr.length()) {
+                        val v = pArr.optJSONObject(i)?.optJSONObject("mainsnak")?.optJSONObject("datavalue")?.optString("value")
+                        if (!v.isNullOrBlank()) sites.add(v)
+                    }
+                }
+
+                for (prop in listOf("P170", "P272")) {
+                    claims.optJSONArray(prop)?.let { pArr ->
+                        for (i in 0 until minOf(pArr.length(), 2)) {
+                            val targetId = pArr.optJSONObject(i)?.optJSONObject("mainsnak")?.optJSONObject("datavalue")?.optJSONObject("value")?.optString("id")
+                            if (!targetId.isNullOrBlank() && !relatedQids.contains(targetId)) {
+                                relatedQids.add(targetId)
+                            }
+                        }
+                    }
+                }
+            }
+
+            for (relId in relatedQids) {
+                if (twHandles.isNotEmpty() && ytChannels.isNotEmpty()) break
+                val relUrl = "https://www.wikidata.org/wiki/Special:EntityData/$relId.json"
+                val rReq = Request.Builder().url(relUrl).header("User-Agent", "Mozilla/5.0").build()
+                client.newCall(rReq).execute().use { rResp ->
+                    if (rResp.isSuccessful) {
+                        val rBody = rResp.body?.string() ?: return@use
+                        val rClaims = JSONObject(rBody).optJSONObject("entities")?.optJSONObject(relId)?.optJSONObject("claims") ?: return@use
+
+                        rClaims.optJSONArray("P2002")?.let { arr ->
+                            for (i in 0 until arr.length()) {
+                                val v = arr.optJSONObject(i)?.optJSONObject("mainsnak")?.optJSONObject("datavalue")?.optString("value")
+                                if (!v.isNullOrBlank()) twHandles.add(v)
+                            }
+                        }
+                        rClaims.optJSONArray("P2397")?.let { arr ->
+                            for (i in 0 until arr.length()) {
+                                val v = arr.optJSONObject(i)?.optJSONObject("mainsnak")?.optJSONObject("datavalue")?.optString("value")
+                                if (!v.isNullOrBlank()) ytChannels.add(v)
+                            }
+                        }
+                        rClaims.optJSONArray("P856")?.let { arr ->
+                            for (i in 0 until arr.length()) {
+                                val v = arr.optJSONObject(i)?.optJSONObject("mainsnak")?.optJSONObject("datavalue")?.optString("value")
+                                if (!v.isNullOrBlank()) sites.add(v)
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+
+        return WebSocialLinks(
+            twitterHandles = twHandles.distinct(),
+            youtubeChannels = ytChannels.distinct(),
+            bilibiliUids = biliUids.distinct(),
+            relatedSites = sites.distinct()
+        )
+    }
+
+    private fun scrapeSocialLinksFromWebsite(url: String, client: OkHttpClient): WebSocialLinks {
+        val twHandles = mutableListOf<String>()
+        val ytChannels = mutableListOf<String>()
+        val biliUids = mutableListOf<Long>()
+        val relatedSites = mutableListOf<String>()
+
+        try {
+            val req = Request.Builder()
+                .url(url)
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+                .build()
+
+            client.newCall(req).execute().use { response ->
+                if (!response.isSuccessful) return WebSocialLinks()
+                val html = response.body?.string() ?: return WebSocialLinks()
+
+                val twM = twitterPattern.matcher(html)
+                while (twM.find()) {
+                    val h = twM.group(1)
+                    if (!h.isNullOrBlank() && !IGNORED_TWITTER_HANDLES.contains(h.lowercase())) {
+                        twHandles.add(h)
+                    }
+                }
+
+                val ytM = youtubePattern.matcher(html)
+                while (ytM.find()) {
+                    val raw = ytM.group(1)
+                    if (!raw.isNullOrBlank()) {
+                        val clean = raw.removePrefix("@").removePrefix("c/").removePrefix("user/")
+                        if (!IGNORED_YOUTUBE_HANDLES.contains(clean.lowercase())) {
+                            ytChannels.add(clean)
+                        }
+                    }
+                }
+
+                val biliM = bilibiliSpacePattern.matcher(html)
+                while (biliM.find()) {
+                    val uid = biliM.group(1)?.toLongOrNull()
+                    if (uid != null && uid > 0L) {
+                        biliUids.add(uid)
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+
+        return WebSocialLinks(
+            twitterHandles = twHandles.distinct(),
+            youtubeChannels = ytChannels.distinct(),
+            bilibiliUids = biliUids.distinct(),
+            relatedSites = relatedSites.distinct()
+        )
+    }
+
+    private fun parseExternalLink(
+        link: String,
+        twHandles: MutableList<String>,
+        ytHandles: MutableList<String>,
+        biliUids: MutableList<Long>,
+        sites: MutableList<String>
+    ) {
+        val twM = twitterPattern.matcher(link)
+        if (twM.find()) {
+            val handle = twM.group(1)
+            if (!handle.isNullOrBlank() && !IGNORED_TWITTER_HANDLES.contains(handle.lowercase())) {
+                twHandles.add(handle)
+            }
+        }
+
+        val ytM = youtubePattern.matcher(link)
+        if (ytM.find()) {
+            val ch = ytM.group(1)
+            if (!ch.isNullOrBlank()) {
+                val clean = ch.removePrefix("@").removePrefix("c/").removePrefix("user/")
+                if (!IGNORED_YOUTUBE_HANDLES.contains(clean.lowercase())) {
+                    ytHandles.add(clean)
+                }
+            }
+        }
+
+        val biliM = bilibiliSpacePattern.matcher(link)
+        if (biliM.find()) {
+            val uid = biliM.group(1)?.toLongOrNull()
+            if (uid != null && uid > 0L) {
+                biliUids.add(uid)
+            }
+        }
+
+        if (link.startsWith("http://") || link.startsWith("https://")) {
+            val low = link.lowercase()
+            if (!low.contains("wikipedia") && !low.contains("wikimedia") && !low.contains("google") &&
+                !low.contains("archive.org") && !low.contains("twitter.com") && !low.contains("x.com") &&
+                !low.contains("youtube.com") && !low.contains("facebook.com") && !low.contains("instagram.com") &&
+                !low.contains("weibo.com") && !low.contains("bilibili.com") && !low.contains("imdb.com") &&
+                !low.contains("fandom.com") && !low.contains("moegirl") && !low.contains("patreon.com")
+            ) {
+                sites.add(link)
+            }
+        }
+    }
 }

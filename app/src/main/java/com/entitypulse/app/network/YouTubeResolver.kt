@@ -21,29 +21,43 @@ object YouTubeResolver {
     }
 
     /**
-     * 快速验证 YouTube 频道 Handle 是否真实存在（通过轻量 HEAD 请求）
+     * 快速验证 YouTube 频道 Handle 是否真实存在且有效（防 404 伪装）
      */
     fun checkHandleExists(handle: String, client: OkHttpClient): Boolean {
         val clean = handle.trim().removePrefix("@")
         if (clean.isBlank()) return false
-        val url = "https://www.youtube.com/@$clean"
+        val url = if (clean.startsWith("UC") && clean.length >= 22) {
+            "https://www.youtube.com/channel/$clean"
+        } else {
+            "https://www.youtube.com/@$clean"
+        }
         val request = Request.Builder()
             .url(url)
             .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
             .header("Accept-Language", "en-US,en;q=0.9")
-            .head()
             .build()
         return try {
             client.newCall(request).execute().use { response ->
-                response.code != 404
+                if (response.code == 404) return false
+                val body = response.body?.string() ?: return false
+                if (body.contains("<title>404 Not Found</title>") ||
+                    body.contains("This page isn't available") ||
+                    body.contains("此页面不可用")
+                ) {
+                    return false
+                }
+                // 必须能找到 browseId、externalId 或 UC... 格式的频道标识
+                browseIdPattern.matcher(body).find() ||
+                        externalIdPattern.matcher(body).find() ||
+                        channelIdPattern.matcher(body).find()
             }
         } catch (_: Exception) {
-            true
+            false
         }
     }
 
     /**
-     * 将任何 YouTube 渠道标识（如 /youtube/user/@TeamCherry、@TeamCherry、Channel URL）
+     * 将任何 YouTube 渠道标识（如 /youtube/user/@SpindleHorse、@TeamCherry、Channel URL）
      * 解析为 YouTube 原生官方 Atom XML 订阅链接：
      * https://www.youtube.com/feeds/videos.xml?channel_id=UC...
      */
@@ -92,12 +106,16 @@ object YouTubeResolver {
 
         client.newCall(request).execute().use { response ->
             if (response.code == 404) {
-                throw IllegalStateException("YouTube 上不存在该频道 (@$handle) [HTTP 404]。该主体可能未在 YouTube 开设独立频道，或视频发布在制作团队/创作者频道中（例如 Hazbin Hotel 的官方视频统一发布在 @SpindleHorse 频道）。建议在【主体详情】中修改或删除此渠道。")
+                throw IllegalStateException("YouTube 上不存在该频道 (@$handle) [HTTP 404 Not Found]。该主体可能未在 YouTube 开设独立频道，相关视频通常在所属制作方或主创频道中发布。建议在【主体详情】中修改或删除此渠道（非网络故障）。")
             }
             if (!response.isSuccessful) {
                 throw IllegalStateException("YouTube 频道页面请求失败: HTTP ${response.code} ${response.message}")
             }
             val html = response.body?.string() ?: throw IllegalStateException("YouTube 页面响应为空")
+
+            if (html.contains("<title>404 Not Found</title>") || html.contains("This page isn't available")) {
+                throw IllegalStateException("YouTube 提示此频道不可用 (@$handle) [404]。该作品可能未在此平台开设独立频道。")
+            }
 
             // 从 RSS link 标签匹配
             val rssM = rssLinkPattern.matcher(html)
@@ -133,7 +151,7 @@ object YouTubeResolver {
                 return "https://www.youtube.com/feeds/videos.xml?channel_id=$cid"
             }
 
-            throw IllegalStateException("无法从 YouTube 页面解析出 Channel ID，请确认代理或网络环境连接正常")
+            throw IllegalStateException("未能从 YouTube 页面解析到频道订阅标识，可能该频道已被设为隐藏或注销。")
         }
     }
 

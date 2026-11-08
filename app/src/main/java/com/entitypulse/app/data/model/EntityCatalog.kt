@@ -242,23 +242,6 @@ object EntityCatalog {
             for ((platform, channels) in channelsByPlatform) {
                 val candidateList = channels.map { it.copy(probabilityNote = "官方认证") }.toMutableList()
 
-                // 补充常见备选变体
-                if (platform == PlatformType.TWITTER && clean.isNotBlank()) {
-                    val rawHandle = "@$clean"
-                    if (candidateList.none { it.identifier.equals(rawHandle, ignoreCase = true) }) {
-                        candidateList.add(
-                            PredefinedChannel(
-                                platformType = PlatformType.TWITTER,
-                                identifier = rawHandle,
-                                title = "X / Twitter ($rawHandle)",
-                                feedPathOrUrl = "/twitter/user/$clean",
-                                defaultSelected = false,
-                                probabilityNote = "通用简称"
-                            )
-                        )
-                    }
-                }
-
                 // 注入全网在线探测到的候选项
                 val onlineMatches = onlineAdditions.filter { it.platformType == platform }
                 for (onl in onlineMatches) {
@@ -292,7 +275,7 @@ object EntityCatalog {
             twitterCandidates.addAll(twOnline)
         } else {
             twitterCandidates.add(
-                PredefinedChannel(PlatformType.TWITTER, "@$clean", "X / Twitter (@$clean)", "/twitter/user/$clean", false, "未在推特检索到官方账号 (可能未开设)")
+                PredefinedChannel(PlatformType.TWITTER, "未收录", "X / Twitter (网络资料未收录官方账号)", "", false, "未发现独立官方推特 (可能未开设)")
             )
         }
         groups.add(PlatformCandidateGroup(PlatformType.TWITTER, twitterCandidates, 0, isEnabled = hasTw))
@@ -305,7 +288,7 @@ object EntityCatalog {
             biliCandidates.addAll(biliOnline)
         } else {
             biliCandidates.add(
-                PredefinedChannel(PlatformType.BILIBILI, trimmed, "Bilibili ($trimmed)", "/bilibili/user/video/$trimmed", false, "B站未检索到官方认证账号 (可能未开设)")
+                PredefinedChannel(PlatformType.BILIBILI, "未收录", "Bilibili (网络资料未收录官方账号)", "", false, "未发现B站官方认证账号")
             )
         }
         groups.add(PlatformCandidateGroup(PlatformType.BILIBILI, biliCandidates, 0, isEnabled = hasBili))
@@ -318,7 +301,7 @@ object EntityCatalog {
             ytCandidates.addAll(ytOnline)
         } else {
             ytCandidates.add(
-                PredefinedChannel(PlatformType.YOUTUBE, "@$clean", "YouTube (@$clean)", "/youtube/user/@$clean", false, "未在YouTube检索到官方频道 (可能未开设)")
+                PredefinedChannel(PlatformType.YOUTUBE, "未收录", "YouTube (网络资料未收录官方频道)", "", false, "未发现独立官方频道")
             )
         }
         groups.add(PlatformCandidateGroup(PlatformType.YOUTUBE, ytCandidates, 0, isEnabled = hasYt))
