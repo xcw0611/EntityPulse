@@ -141,7 +141,7 @@ fun SettingsDesktopDialog(
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Text(
-                                    text = if (isProxyEnabled) "已启用代理路由 (默认 127.0.0.1:7890)" else "代理已禁用 (全部直连)",
+                                    text = if (isProxyEnabled) "已启用代理路由 (默认 127.0.0.1:7897)" else "代理已禁用 (全部直连)",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = if (isProxyEnabled) Color(0xFF34D399) else MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -151,7 +151,7 @@ fun SettingsDesktopDialog(
                                         isTestingPing = true
                                         pingResult = null
                                         coroutineScope.launch {
-                                            val p = proxyPort.toIntOrNull() ?: 7890
+                                            val p = proxyPort.toIntOrNull() ?: 7897
                                             nodeManager.isProxyEnabled = isProxyEnabled
                                             nodeManager.proxyHost = proxyHost.trim()
                                             nodeManager.proxyPort = p
@@ -304,7 +304,7 @@ fun SettingsDesktopDialog(
                     Button(onClick = {
                         nodeManager.isProxyEnabled = isProxyEnabled
                         nodeManager.proxyHost = proxyHost.trim()
-                        nodeManager.proxyPort = proxyPort.toIntOrNull() ?: 7890
+                        nodeManager.proxyPort = proxyPort.toIntOrNull() ?: 7897
                         nodeManager.proxyType = proxyType
                         nodeManager.defaultTimeRange = defaultTimeRange
                         nodeManager.activeNode = activeNode.trim()

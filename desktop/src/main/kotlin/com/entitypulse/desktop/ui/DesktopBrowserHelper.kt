@@ -16,11 +16,16 @@ object DesktopBrowserHelper {
         return try {
             val trimmed = url.trim()
             if (trimmed.isBlank()) return false
-            val uri = if (!trimmed.startsWith("http://", ignoreCase = true) && !trimmed.startsWith("https://", ignoreCase = true)) {
-                URI("https://$trimmed")
-            } else {
-                URI(trimmed)
+            var cleanUrl = trimmed
+            if (cleanUrl.startsWith("/twitter/user/")) {
+                cleanUrl = "https://x.com/${cleanUrl.removePrefix("/twitter/user/").substringBefore('/')}"
+            } else if (cleanUrl.startsWith("/")) {
+                cleanUrl = "https://x.com$cleanUrl"
+            } else if (!cleanUrl.startsWith("http://", ignoreCase = true) && !cleanUrl.startsWith("https://", ignoreCase = true)) {
+                cleanUrl = "https://$cleanUrl"
             }
+            cleanUrl = cleanUrl.replace("https://twitter.com/", "https://x.com/")
+            val uri = URI(cleanUrl)
             if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
                 Desktop.getDesktop().browse(uri)
                 AppLogger.i("DesktopBrowserHelper", "已在系统默认浏览器中打开: $uri")

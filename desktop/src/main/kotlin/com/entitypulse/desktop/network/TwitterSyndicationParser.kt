@@ -101,7 +101,17 @@ object TwitterSyndicationParser {
             val publishedAt = parseTwitterDate(createdAtStr)
             val user = tweet.optJSONObject("user")
             val authorName = user?.optString("name", username)
-            val permalink = tweet.optString("permalink", "https://x.com/$username/status/$tweetId")
+            val screenName = user?.optString("screen_name")?.ifBlank { username } ?: username
+            val rawPermalink = tweet.optString("permalink", "")
+            val canonicalTweetUrl = if (tweetId.isNotBlank() && tweetId != "0") {
+                "https://x.com/$screenName/status/$tweetId"
+            } else if (rawPermalink.startsWith("http://") || rawPermalink.startsWith("https://")) {
+                rawPermalink.replace("twitter.com", "x.com")
+            } else if (rawPermalink.isNotBlank()) {
+                "https://x.com/${rawPermalink.trimStart('/')}"
+            } else {
+                "https://x.com/$screenName"
+            }
 
             val mediaUrls = mutableListOf<String>()
             val mediaEntities = tweet.optJSONObject("entities")?.optJSONArray("media")
@@ -136,7 +146,7 @@ object TwitterSyndicationParser {
                 ParsedFeedItem(
                     guid = tweetId,
                     title = text.take(60).replace("\n", " ") + (if (text.length > 60) "..." else ""),
-                    link = permalink,
+                    link = canonicalTweetUrl,
                     author = authorName,
                     publishedAt = publishedAt,
                     contentPlainText = text,

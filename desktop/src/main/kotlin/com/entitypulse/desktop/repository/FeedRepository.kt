@@ -416,7 +416,7 @@ class FeedRepository(
         // HTTP 403
         if (msg.contains("403") || msg.contains("Forbidden", ignoreCase = true)) {
             return IllegalStateException(
-                "目标节点触发了安全防护或鉴权限制 (HTTP 403 Forbidden)。建议在【设置】中配置本地代理端口（默认 7890）或在浏览器中直接打开。"
+                "目标节点触发了安全防护或鉴权限制 (HTTP 403 Forbidden)。建议在【设置】中配置本地代理端口（默认 7897）或在浏览器中直接打开。"
             )
         }
 
@@ -429,7 +429,7 @@ class FeedRepository(
         val isDnsFailed = msg.contains("Unable to resolve host", ignoreCase = true) || msg.contains("UnknownHost", ignoreCase = true)
 
         val friendlyReason = when {
-            isRefused -> "代理端口连接被拒绝 (Connection Refused)。请确认 Clash Meta 代理客户端已启动且本地端口（如 7890）设置正确。"
+            isRefused -> "代理端口连接被拒绝 (Connection Refused)。请确认 Clash Meta 代理客户端已启动且本地端口（如 7897）设置正确。"
             isDnsFailed -> "网络域名解析失败，请检查网络连接状态或 DNS 配置。"
             isConnectionClosed -> "网络连接被对端中断或重置 (Connection closed)。若正在访问海外站点，通常由于国内直连受限或代理节点不稳定，请检查 Clash Meta 节点连通性。"
             isTimeout -> "网络请求超时，目标服务器响应过慢，请检查网络延迟。"

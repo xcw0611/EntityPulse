@@ -124,6 +124,10 @@ fun DesktopEntityList(
                 }
             },
             singleLine = true,
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedTextColor = Color(0xFFF1F5F9),
+                unfocusedTextColor = Color(0xFFF1F5F9)
+            ),
             modifier = Modifier.fillMaxWidth()
         )
 
@@ -154,6 +158,7 @@ fun DesktopEntityList(
                     text = "全部主体动态",
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = if (selectedEntityId == null) FontWeight.Bold else FontWeight.Normal,
+                    color = if (selectedEntityId == null) MaterialTheme.colorScheme.primary else Color(0xFFF1F5F9),
                     modifier = Modifier.weight(1f)
                 )
                 if (totalUnread > 0) {
@@ -241,12 +246,13 @@ fun DesktopEntityList(
                                 text = item.record.name,
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                color = if (isSelected) MaterialTheme.colorScheme.primary else Color(0xFFF1F5F9),
                                 maxLines = 1
                             )
                             Text(
                                 text = item.record.category,
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                color = Color(0xFF94A3B8),
                                 maxLines = 1
                             )
                         }

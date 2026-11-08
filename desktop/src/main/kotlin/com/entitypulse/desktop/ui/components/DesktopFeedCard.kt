@@ -33,6 +33,24 @@ import java.util.*
 
 private val dateFormat = SimpleDateFormat("yyyy/MM/dd HH:mm", Locale.CHINA)
 
+fun isForeignText(text: String): Boolean {
+    val clean = text.trim()
+    if (clean.isBlank()) return false
+    var chineseCount = 0
+    var latinCount = 0
+    for (ch in clean) {
+        val ub = Character.UnicodeBlock.of(ch)
+        if (ub == Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS ||
+            ub == Character.UnicodeBlock.CJK_COMPATIBILITY_IDEOGRAPHS ||
+            ub == Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS_EXTENSION_A) {
+            chineseCount++
+        } else if (ch.isLetter()) {
+            latinCount++
+        }
+    }
+    return latinCount > 6 && (chineseCount < latinCount / 2)
+}
+
 @Composable
 fun DesktopFeedCard(
     feedMeta: FeedItemWithMeta,
@@ -44,9 +62,36 @@ fun DesktopFeedCard(
     val coroutineScope = rememberCoroutineScope()
     val item = feedMeta.item
 
+    val combinedOriginalText = remember(item.title, item.contentPlainText) {
+        val t = item.title.trim()
+        val c = item.contentPlainText.trim()
+        if (t.isNotBlank() && c.isNotBlank() && !c.startsWith(t)) "$t\n\n$c" else if (c.isNotBlank()) c else t
+    }
+
+    val needsTranslation = remember(combinedOriginalText) {
+        isForeignText(combinedOriginalText)
+    }
+
     var isTranslating by remember { mutableStateOf(false) }
     var translatedText by remember { mutableStateOf<String?>(null) }
+    var showOriginal by remember { mutableStateOf(!needsTranslation) }
     var isExpanded by remember { mutableStateOf(false) }
+
+    // 自动在加载时直接请求中文翻译（若为非中文动态）
+    LaunchedEffect(item.id, needsTranslation) {
+        if (needsTranslation && translatedText == null) {
+            isTranslating = true
+            val res = TranslationManager.translate(combinedOriginalText, client = nodeManager.getOkHttpClient())
+            val trans = res.getOrNull()
+            if (!trans.isNullOrBlank() && trans != combinedOriginalText) {
+                translatedText = trans
+                showOriginal = false // 默认直接显示中文译文
+            } else {
+                showOriginal = true
+            }
+            isTranslating = false
+        }
+    }
 
     val mediaUrls = remember(item.mediaUrlsJson) {
         val json = item.mediaUrlsJson
@@ -105,7 +150,7 @@ fun DesktopFeedCard(
                             text = feedMeta.entityName,
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurface
+                            color = Color(0xFFF1F5F9)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         // Platform Badge
@@ -121,12 +166,28 @@ fun DesktopFeedCard(
                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                             )
                         }
+
+                        if (translatedText != null && !showOriginal) {
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Surface(
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                                shape = RoundedCornerShape(4.dp)
+                            ) {
+                                Text(
+                                    text = "中文译文",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
                     }
                     if (!item.author.isNullOrBlank()) {
                         Text(
                             text = "@${item.author}",
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = Color(0xFF94A3B8)
                         )
                     }
                 }
@@ -135,7 +196,7 @@ fun DesktopFeedCard(
                 Text(
                     text = dateFormat.format(Date(item.publishedAt)),
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = Color(0xFF94A3B8)
                 )
 
                 Spacer(modifier = Modifier.width(8.dp))
@@ -148,64 +209,38 @@ fun DesktopFeedCard(
                     Icon(
                         imageVector = if (item.isRead) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
                         contentDescription = if (item.isRead) "已读" else "未读",
-                        tint = if (item.isRead) MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f) else MaterialTheme.colorScheme.primary,
+                        tint = if (item.isRead) Color(0xFF64748B) else MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(18.dp)
                     )
                 }
             }
 
-            // Title
-            if (item.title.isNotBlank()) {
-                Text(
-                    text = item.title,
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
+            // Text Content (Title & Body)
+            // 当翻译就绪且处于译文模式时，直接呈现翻译后的完整段落
+            val currentDisplayText = if (translatedText != null && !showOriginal) {
+                translatedText!!
+            } else {
+                combinedOriginalText
             }
 
-            // Body text
-            if (item.contentPlainText.isNotBlank()) {
+            if (currentDisplayText.isNotBlank()) {
                 Text(
-                    text = item.contentPlainText,
+                    text = currentDisplayText,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
-                    maxLines = if (isExpanded) Int.MAX_VALUE else 5,
+                    color = Color(0xFFF1F5F9),
+                    maxLines = if (isExpanded) Int.MAX_VALUE else 6,
                     overflow = TextOverflow.Ellipsis
                 )
-                if (item.contentPlainText.length > 200) {
+                if (currentDisplayText.length > 200) {
                     Text(
                         text = if (isExpanded) "收起内容" else "展开全文",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Bold,
                         modifier = Modifier
                             .clickable { isExpanded = !isExpanded }
                             .padding(vertical = 2.dp)
                     )
-                }
-            }
-
-            // Translation block
-            AnimatedVisibility(visible = translatedText != null) {
-                Surface(
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
-                    shape = RoundedCornerShape(8.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.padding(10.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Translate, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("中文译文：", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                        }
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = translatedText ?: "",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
                 }
             }
 
@@ -252,37 +287,46 @@ fun DesktopFeedCard(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Translation button
-                FilledTonalButton(
-                    onClick = {
-                        if (translatedText != null) {
-                            translatedText = null
-                        } else {
-                            val textToTranslate = item.title + "\n" + item.contentPlainText
-                            if (textToTranslate.isNotBlank()) {
+                // 翻译 / 查看原文切换按钮
+                if (needsTranslation || translatedText != null) {
+                    FilledTonalButton(
+                        onClick = {
+                            if (translatedText != null) {
+                                showOriginal = !showOriginal
+                            } else {
                                 isTranslating = true
                                 coroutineScope.launch {
-                                    val res = TranslationManager.translate(textToTranslate, client = nodeManager.getOkHttpClient())
+                                    val res = TranslationManager.translate(combinedOriginalText, client = nodeManager.getOkHttpClient())
+                                    val t = res.getOrNull()
+                                    if (!t.isNullOrBlank()) {
+                                        translatedText = t
+                                        showOriginal = false
+                                    }
                                     isTranslating = false
-                                    translatedText = res.getOrNull()
                                 }
                             }
+                        },
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                        modifier = Modifier.height(30.dp),
+                        enabled = !isTranslating
+                    ) {
+                        if (isTranslating) {
+                            CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("翻译中...", style = MaterialTheme.typography.labelSmall)
+                        } else {
+                            Icon(Icons.Default.Translate, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = if (translatedText != null && !showOriginal) "显示原文" else "显示译文",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold
+                            )
                         }
-                    },
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
-                    modifier = Modifier.height(30.dp),
-                    enabled = !isTranslating
-                ) {
-                    if (isTranslating) {
-                        CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
-                    } else {
-                        Icon(Icons.Default.Translate, contentDescription = null, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(if (translatedText != null) "隐藏翻译" else "翻译为中文", style = MaterialTheme.typography.labelSmall)
                     }
-                }
 
-                Spacer(modifier = Modifier.width(8.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                }
 
                 // Bookmark toggle
                 IconButton(
@@ -292,7 +336,7 @@ fun DesktopFeedCard(
                     Icon(
                         imageVector = if (item.isBookmarked) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
                         contentDescription = "收藏",
-                        tint = if (item.isBookmarked) Color(0xFFF59E0B) else MaterialTheme.colorScheme.onSurfaceVariant,
+                        tint = if (item.isBookmarked) Color(0xFFF59E0B) else Color(0xFF94A3B8),
                         modifier = Modifier.size(18.dp)
                     )
                 }
@@ -306,7 +350,7 @@ fun DesktopFeedCard(
                         Icon(
                             imageVector = Icons.Default.ContentCopy,
                             contentDescription = "复制链接",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            tint = Color(0xFF94A3B8),
                             modifier = Modifier.size(18.dp)
                         )
                     }

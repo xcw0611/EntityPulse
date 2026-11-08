@@ -42,25 +42,7 @@ object OnlineEntityLocator {
         val candidates = mutableListOf<IpCandidate>()
         AppLogger.i("OnlineEntityLocator", "开始全网定位主体 IP 候选: $trimmed")
 
-        // 1. 精选主体库快速前置命中
-        val popular = EntityCatalog.POPULAR_ENTITIES.firstOrNull {
-            it.name.equals(trimmed, ignoreCase = true) ||
-                    trimmed.contains(it.name, ignoreCase = true) ||
-                    it.name.contains(trimmed, ignoreCase = true)
-        }
-        if (popular != null) {
-            candidates.add(
-                IpCandidate(
-                    canonicalName = popular.name,
-                    category = popular.category,
-                    bio = popular.bio,
-                    avatarUrl = popular.avatarUrl,
-                    sourceNote = "精选认证主体"
-                )
-            )
-        }
-
-        // 2. Steam 游戏商店检索（高画质 Header 460x215 图）
+        // 1. Steam 游戏商店检索（高画质 Header 460x215 图）
         try {
             val steamGames = querySteamStore(trimmed, client)
             for (game in steamGames) {
@@ -144,13 +126,7 @@ object OnlineEntityLocator {
         val trimmed = query.trim()
         if (trimmed.isBlank()) return@withContext null
 
-        // 1. 精选库
-        val pop = EntityCatalog.POPULAR_ENTITIES.firstOrNull {
-            it.name.contains(trimmed, true) || trimmed.contains(it.name, true)
-        }
-        if (!pop?.avatarUrl.isNullOrBlank()) return@withContext pop?.avatarUrl
-
-        // 2. 维基百科 (中/英) 高清原图
+        // 1. 维基百科 (中/英) 高清原图
         try {
             val wikiImg = fetchWikipediaImage(trimmed, client, "zh") ?: fetchWikipediaImage(trimmed, client, "en")
             if (!wikiImg.isNullOrBlank()) return@withContext wikiImg

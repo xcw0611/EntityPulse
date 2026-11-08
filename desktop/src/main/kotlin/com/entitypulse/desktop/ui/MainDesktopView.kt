@@ -53,6 +53,8 @@ fun MainDesktopView() {
     // Feeds state
     var allFeeds by remember { mutableStateOf<List<FeedItemWithMeta>>(emptyList()) }
     var channelsForSelected by remember { mutableStateOf<List<SourceChannelRecord>>(emptyList()) }
+    val feedListState = androidx.compose.foundation.lazy.rememberLazyListState()
+    val showScrollToTop by remember { derivedStateOf { feedListState.firstVisibleItemIndex > 1 } }
 
     // Dialog flags
     var showAddEntityDialog by remember { mutableStateOf(false) }
@@ -203,6 +205,10 @@ fun MainDesktopView() {
                             }
                         },
                         singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color(0xFFF1F5F9),
+                            unfocusedTextColor = Color(0xFFF1F5F9)
+                        ),
                         modifier = Modifier.width(260.dp).height(50.dp)
                     )
 
@@ -311,31 +317,64 @@ fun MainDesktopView() {
                         }
                     }
                 } else {
-                    LazyColumn(
-                        modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(14.dp),
-                        contentPadding = PaddingValues(bottom = 24.dp)
-                    ) {
-                        items(displayedFeeds, key = { it.item.id }) { feedMeta ->
-                            DesktopFeedCard(
-                                feedMeta = feedMeta,
-                                nodeManager = nodeManager,
-                                onToggleRead = { isRead ->
+                    Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                        LazyColumn(
+                            state = feedListState,
+                            modifier = Modifier.fillMaxSize(),
+                            verticalArrangement = Arrangement.spacedBy(14.dp),
+                            contentPadding = PaddingValues(bottom = 36.dp)
+                        ) {
+                            items(displayedFeeds, key = { it.item.id }) { feedMeta ->
+                                DesktopFeedCard(
+                                    feedMeta = feedMeta,
+                                    nodeManager = nodeManager,
+                                    onToggleRead = { isRead ->
+                                        coroutineScope.launch {
+                                            repository.markAsRead(feedMeta.item.id, isRead)
+                                            reloadFeeds()
+                                        }
+                                    },
+                                    onToggleBookmark = { isBookmarked ->
+                                        coroutineScope.launch {
+                                            repository.toggleBookmark(feedMeta.item.id, isBookmarked)
+                                            reloadFeeds()
+                                        }
+                                    },
+                                    onSelectEntity = {
+                                        selectedEntityId = feedMeta.item.entityId
+                                    }
+                                )
+                            }
+                        }
+
+                        // 回到顶部悬浮按钮
+                        AnimatedVisibility(
+                            visible = showScrollToTop,
+                            modifier = Modifier
+                                .align(Alignment.BottomEnd)
+                                .padding(end = 16.dp, bottom = 16.dp)
+                        ) {
+                            FilledTonalButton(
+                                onClick = {
                                     coroutineScope.launch {
-                                        repository.markAsRead(feedMeta.item.id, isRead)
-                                        reloadFeeds()
+                                        feedListState.animateScrollToItem(0)
                                     }
                                 },
-                                onToggleBookmark = { isBookmarked ->
-                                    coroutineScope.launch {
-                                        repository.toggleBookmark(feedMeta.item.id, isBookmarked)
-                                        reloadFeeds()
-                                    }
-                                },
-                                onSelectEntity = {
-                                    selectedEntityId = feedMeta.item.entityId
-                                }
-                            )
+                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                                shape = RoundedCornerShape(20.dp),
+                                colors = ButtonDefaults.filledTonalButtonColors(
+                                    containerColor = MaterialTheme.colorScheme.primary,
+                                    contentColor = Color.White
+                                )
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.KeyboardArrowUp,
+                                    contentDescription = "回到顶部",
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("回到顶部", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                 }

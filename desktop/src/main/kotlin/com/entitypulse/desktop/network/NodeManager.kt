@@ -22,10 +22,10 @@ class NodeManager {
     )
     var accessToken: String = ""
 
-    // PC 端默认直连本地 Clash Meta / 代理软件 (127.0.0.1:7890)
+    // PC 端默认直连本地 Clash Meta / 代理软件 (127.0.0.1:7897)
     var isProxyEnabled: Boolean = true
     var proxyHost: String = "127.0.0.1"
-    var proxyPort: Int = 7890
+    var proxyPort: Int = 7897
     var proxyType: String = "HTTP" // "HTTP" 或 "SOCKS"
 
     var defaultTimeRange: TimeRangeFilter = TimeRangeFilter.ONE_YEAR

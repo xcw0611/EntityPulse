@@ -5,11 +5,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -20,9 +19,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
-import com.entitypulse.desktop.data.model.EntityCatalog
 import com.entitypulse.desktop.data.model.PredefinedChannel
 import com.entitypulse.desktop.network.IpCandidate
 import com.entitypulse.desktop.network.NodeManager
@@ -32,7 +31,6 @@ import com.entitypulse.desktop.ui.DesktopBrowserHelper
 import com.entitypulse.desktop.ui.theme.DarkBorder
 import com.entitypulse.desktop.ui.theme.DarkSurfaceElevated
 import com.entitypulse.desktop.ui.theme.VipGold
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.net.URLEncoder
 
@@ -63,8 +61,8 @@ fun AddEntityDesktopDialog(
     var selectedCandidateIndex by remember { mutableStateOf(-1) }
     var addedChannels by remember { mutableStateOf<List<PredefinedChannel>>(emptyList()) }
 
-    fun triggerIpSearch(queryStr: String) {
-        val query = queryStr.trim()
+    fun triggerIpSearch() {
+        val query = name.trim()
         if (query.length < 2) {
             ipCandidates = emptyList()
             selectedCandidateIndex = -1
@@ -85,19 +83,12 @@ fun AddEntityDesktopDialog(
         }
     }
 
-    LaunchedEffect(name) {
-        val query = name.trim()
-        if (query.length >= 2 && selectedCandidateIndex == -1) {
-            delay(500)
-            triggerIpSearch(query)
-        }
-    }
-
     Dialog(onDismissRequest = onDismiss) {
         Card(
             modifier = Modifier
                 .width(760.dp)
-                .heightIn(max = 680.dp)
+                .wrapContentHeight()
+                .heightIn(max = 750.dp)
                 .padding(16.dp),
             shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -105,7 +96,7 @@ fun AddEntityDesktopDialog(
         ) {
             Column(
                 modifier = Modifier
-                    .fillMaxSize()
+                    .fillMaxWidth()
                     .padding(24.dp)
             ) {
                 // Title bar
@@ -123,11 +114,12 @@ fun AddEntityDesktopDialog(
                     Text(
                         text = "添加关注主体 (全网 IP 定位)",
                         style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                     Spacer(modifier = Modifier.weight(1f))
                     IconButton(onClick = onDismiss) {
-                        Icon(Icons.Default.Close, contentDescription = "关闭")
+                        Icon(Icons.Default.Close, contentDescription = "关闭", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
 
@@ -136,58 +128,52 @@ fun AddEntityDesktopDialog(
                 // Scrollable content
                 Column(
                     modifier = Modifier
-                        .weight(1f)
+                        .fillMaxWidth()
+                        .weight(1f, fill = false)
                         .verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    // Quick presets
-                    Text(
-                        text = "快速精选热门主体：",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    // Search Input row (at the top, right below title)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        EntityCatalog.POPULAR_ENTITIES.forEach { popular ->
-                            AssistChip(
-                                onClick = {
-                                    name = popular.name
-                                    bio = popular.bio
-                                    avatarUrl = popular.avatarUrl ?: ""
-                                    category = popular.category
-                                    isVip = popular.isVip
-                                    addedChannels = popular.channels
-                                    selectedCandidateIndex = 0
-                                },
-                                label = { Text(popular.name) }
-                            )
+                        OutlinedTextField(
+                            value = name,
+                            onValueChange = {
+                                name = it
+                                selectedCandidateIndex = -1
+                            },
+                            label = { Text("主体或作品名称 (如: 地狱客栈 / 黑神话:悟空 / Team Cherry)") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                            keyboardActions = KeyboardActions(onSearch = { triggerIpSearch() }),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                unfocusedTextColor = MaterialTheme.colorScheme.onSurface
+                            ),
+                            modifier = Modifier.weight(1f)
+                        )
+
+                        Button(
+                            onClick = { triggerIpSearch() },
+                            enabled = !isSearchingIp && name.trim().length >= 2,
+                            modifier = Modifier.height(54.dp)
+                        ) {
+                            if (isSearchingIp) {
+                                CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("正在定位...")
+                            } else {
+                                Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("定位主体 IP")
+                            }
                         }
                     }
 
-                    // Input field
-                    OutlinedTextField(
-                        value = name,
-                        onValueChange = {
-                            name = it
-                            selectedCandidateIndex = -1
-                        },
-                        label = { Text("主体或作品名称 (如: 地狱客栈 / 黑神话:悟空 / Team Cherry / 崩坏：星穹铁道)") },
-                        singleLine = true,
-                        trailingIcon = {
-                            if (isSearchingIp) {
-                                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                            } else {
-                                IconButton(onClick = { triggerIpSearch(name) }) {
-                                    Icon(Icons.Default.Search, contentDescription = "定位")
-                                }
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    // IP Candidates list
+                    // Candidates list (if searched and found)
                     if (ipCandidates.isNotEmpty()) {
                         Column(
                             modifier = Modifier
@@ -197,7 +183,7 @@ fun AddEntityDesktopDialog(
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             Text(
-                                text = "全网匹配到的主体 IP 备选项 (点击即可快速选定并填充):",
+                                text = "全网匹配到的主体 IP 备选项 (点击即可快速选定并填充资料):",
                                 style = MaterialTheme.typography.labelMedium,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.primary
@@ -241,7 +227,8 @@ fun AddEntityDesktopDialog(
                                                 Text(
                                                     text = candidate.canonicalName,
                                                     style = MaterialTheme.typography.bodyMedium,
-                                                    fontWeight = FontWeight.Bold
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = MaterialTheme.colorScheme.onSurface
                                                 )
                                                 Spacer(modifier = Modifier.width(8.dp))
                                                 Surface(
@@ -251,6 +238,7 @@ fun AddEntityDesktopDialog(
                                                     Text(
                                                         text = candidate.category,
                                                         style = MaterialTheme.typography.labelSmall,
+                                                        color = MaterialTheme.colorScheme.primary,
                                                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                                     )
                                                 }
@@ -295,7 +283,7 @@ fun AddEntityDesktopDialog(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Text("主体封面", style = MaterialTheme.typography.labelMedium)
+                            Text("主体封面", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurface)
                             DesktopAsyncImage(
                                 url = avatarUrl.ifBlank { null },
                                 contentDescription = name,
@@ -329,6 +317,10 @@ fun AddEntityDesktopDialog(
                                 onValueChange = { bio = it },
                                 label = { Text("主体简介 / 描述") },
                                 singleLine = true,
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                    unfocusedTextColor = MaterialTheme.colorScheme.onSurface
+                                ),
                                 modifier = Modifier.fillMaxWidth()
                             )
                             Row(
@@ -340,6 +332,10 @@ fun AddEntityDesktopDialog(
                                     onValueChange = { category = it },
                                     label = { Text("分类") },
                                     singleLine = true,
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                        unfocusedTextColor = MaterialTheme.colorScheme.onSurface
+                                    ),
                                     modifier = Modifier.weight(1f)
                                 )
                                 OutlinedTextField(
@@ -347,11 +343,16 @@ fun AddEntityDesktopDialog(
                                     onValueChange = { avatarUrl = it },
                                     label = { Text("封面 URL (可选)") },
                                     singleLine = true,
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                        unfocusedTextColor = MaterialTheme.colorScheme.onSurface
+                                    ),
                                     modifier = Modifier.weight(1f)
                                 )
                             }
                             Row(
-                                verticalAlignment = Alignment.CenterVertically
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.fillMaxWidth()
                             ) {
                                 Checkbox(
                                     checked = isVip,
@@ -370,12 +371,12 @@ fun AddEntityDesktopDialog(
                                         val searchKeyword = runCatching { URLEncoder.encode("$name 官方社交媒体", "UTF-8") }.getOrDefault(name)
                                         DesktopBrowserHelper.openInBrowser("https://www.bing.com/search?q=$searchKeyword")
                                     },
-                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                                    modifier = Modifier.height(32.dp)
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                    modifier = Modifier.heightIn(min = 36.dp)
                                 ) {
                                     Icon(Icons.Default.OpenInBrowser, contentDescription = null, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(6.dp))
-                                    Text("在系统浏览器中查找该主体官方账号", style = MaterialTheme.typography.labelSmall)
+                                    Text("浏览器查找官方账号", style = MaterialTheme.typography.labelSmall)
                                 }
                             }
                         }

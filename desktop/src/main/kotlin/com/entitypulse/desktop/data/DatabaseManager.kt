@@ -34,47 +34,6 @@ class DatabaseManager {
         connection = DriverManager.getConnection("jdbc:sqlite:$dbPath")
         createTablesIfNotExist()
         refreshEntitiesInternal()
-        if (_entitiesState.value.isEmpty()) {
-            seedPopularEntities()
-        }
-    }
-
-    private fun seedPopularEntities() {
-        AppLogger.i("DatabaseManager", "数据库为空，初始化精选关注主体...")
-        for (pop in EntityCatalog.POPULAR_ENTITIES) {
-            val sql = "INSERT INTO entities (name, avatarUrl, bio, category, isVip, isNotifyEnabled, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-            var newId = 0L
-            connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS).use { pstmt ->
-                pstmt.setString(1, pop.name)
-                pstmt.setString(2, pop.avatarUrl)
-                pstmt.setString(3, pop.bio)
-                pstmt.setString(4, pop.category)
-                pstmt.setInt(5, if (pop.isVip) 1 else 0)
-                pstmt.setInt(6, 1)
-                val now = System.currentTimeMillis()
-                pstmt.setLong(7, now)
-                pstmt.setLong(8, now)
-                pstmt.executeUpdate()
-                pstmt.generatedKeys.use { rs ->
-                    if (rs.next()) newId = rs.getLong(1)
-                }
-            }
-            if (newId > 0) {
-                for (ch in pop.channels) {
-                    val chSql = "INSERT INTO channels (entityId, platformType, identifier, resolvedFeedUrl, title, isEnabled, lastSyncTime, createdAt) VALUES (?, ?, ?, ?, ?, 1, 0, ?)"
-                    connection.prepareStatement(chSql).use { pstmt ->
-                        pstmt.setLong(1, newId)
-                        pstmt.setString(2, ch.platformType.name)
-                        pstmt.setString(3, ch.identifier)
-                        pstmt.setString(4, ch.feedPathOrUrl)
-                        pstmt.setString(5, ch.title)
-                        pstmt.setLong(6, System.currentTimeMillis())
-                        pstmt.executeUpdate()
-                    }
-                }
-            }
-        }
-        refreshEntitiesInternal()
     }
 
     private fun createTablesIfNotExist() {

@@ -1,9 +1,8 @@
 package com.entitypulse.desktop.ui.theme
 
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
@@ -23,7 +22,7 @@ private val DarkColors = darkColorScheme(
     secondary = BrandCyan,
     onSecondary = Color.Black,
     surface = DarkSurface,
-    onSurface = Color(0xFFE2E8F0),
+    onSurface = Color(0xFFF1F5F9),
     surfaceVariant = DarkSurfaceElevated,
     onSurfaceVariant = Color(0xFF94A3B8),
     background = DarkBackground,
@@ -35,6 +34,11 @@ private val DarkColors = darkColorScheme(
 fun EntityPulseDesktopTheme(content: @Composable () -> Unit) {
     MaterialTheme(
         colorScheme = DarkColors,
-        content = content
-    )
+    ) {
+        Surface(
+            color = DarkBackground,
+            contentColor = Color(0xFFF1F5F9),
+            content = content
+        )
+    }
 }

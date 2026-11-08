@@ -139,7 +139,8 @@ fun DesktopInspectorPanel(
                                 Text(
                                     text = selectedEntity.name,
                                     style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFFF1F5F9)
                                 )
                                 Spacer(modifier = Modifier.height(2.dp))
                                 Surface(
@@ -212,7 +213,8 @@ fun DesktopInspectorPanel(
                     Text(
                         text = "已绑定的社媒渠道 (${channels.size})",
                         style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFFF1F5F9)
                     )
                     Spacer(modifier = Modifier.weight(1f))
                     IconButton(
@@ -275,6 +277,7 @@ fun DesktopInspectorPanel(
                                         text = channel.title,
                                         style = MaterialTheme.typography.bodyMedium,
                                         fontWeight = FontWeight.Bold,
+                                        color = Color(0xFFF1F5F9),
                                         modifier = Modifier.weight(1f),
                                         maxLines = 1
                                     )
