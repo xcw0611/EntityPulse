@@ -30,6 +30,14 @@ jobs:
       - name: Build & Package Windows Portable App
         run: gradle :desktop:packagePortableZip --stacktrace
 
+      - name: Print jpackage logs on failure
+        if: failure()
+        run: |
+          Get-ChildItem -Recurse desktop/build/compose/logs -ErrorAction SilentlyContinue | ForEach-Object {
+            Write-Host "=== Log: $($_.FullName) ==="
+            Get-Content $_.FullName
+          }
+
       - name: Upload Windows Portable App (.zip)
         uses: actions/upload-artifact@v4
         with:

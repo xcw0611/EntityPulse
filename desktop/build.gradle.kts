@@ -32,11 +32,6 @@ compose.desktop {
             description = "EntityPulse - 全网社媒与动态聚合 (PC桌面端)"
             copyright = "© 2026 EntityPulse"
             vendor = "EntityPulse"
-
-            windows {
-                menu = true
-                shortcut = true
-            }
         }
     }
 }
