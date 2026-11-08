@@ -33,7 +33,7 @@ jobs:
       - name: Print jpackage logs on failure
         if: failure()
         run: |
-          Get-ChildItem -Recurse desktop/build/compose/logs -ErrorAction SilentlyContinue | ForEach-Object {
+          Get-ChildItem -Recurse -File desktop/build/compose/logs -ErrorAction SilentlyContinue | ForEach-Object {
             Write-Host "=== Log: $($_.FullName) ==="
             Get-Content $_.FullName
           }
