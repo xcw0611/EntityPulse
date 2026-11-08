@@ -28,7 +28,7 @@ jobs:
           gradle-version: '8.10.2'
 
       - name: Build & Package Windows Portable App
-        run: gradle :desktop:packagePortableZip :desktop:createDistributable --stacktrace
+        run: gradle :desktop:packagePortableZip --stacktrace
 
       - name: Upload Windows Portable App (.zip)
         uses: actions/upload-artifact@v4

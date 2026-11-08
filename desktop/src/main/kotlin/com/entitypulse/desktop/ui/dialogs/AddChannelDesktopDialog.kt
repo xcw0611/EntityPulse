@@ -146,7 +146,7 @@ fun AddChannelDesktopDialog(
                         AssistChip(
                             onClick = { DesktopBrowserHelper.openInBrowser(link) },
                             label = { Text(name) },
-                            leadingIcon = { Icon(Icons.Default.Launch, contentDescription = null, modifier = Modifier.size(14.dp)) }
+                            leadingIcon = { Icon(Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(14.dp)) }
                         )
                     }
                 }

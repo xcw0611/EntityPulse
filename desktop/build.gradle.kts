@@ -27,7 +27,6 @@ compose.desktop {
     application {
         mainClass = "com.entitypulse.desktop.MainKt"
         nativeDistributions {
-            targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Exe)
             packageName = "EntityPulse"
             packageVersion = "1.0.0"
             description = "EntityPulse - 全网社媒与动态聚合 (PC桌面端)"
@@ -37,7 +36,6 @@ compose.desktop {
             windows {
                 menu = true
                 shortcut = true
-                upgradeUuid = "6f8e79b2-32a1-40e8-8b89-e85d996d9972"
             }
         }
     }
