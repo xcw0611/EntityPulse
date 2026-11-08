@@ -17,7 +17,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.entitypulse.desktop.data.model.TimeRangeFilter
 import com.entitypulse.desktop.network.NodeManager
-import com.entitypulse.desktop.network.PingResult
 import com.entitypulse.desktop.ui.theme.DarkBorder
 import com.entitypulse.desktop.ui.theme.DarkSurfaceElevated
 import com.entitypulse.desktop.util.AppLogger
@@ -31,15 +30,16 @@ fun SettingsDesktopDialog(
 ) {
     val coroutineScope = rememberCoroutineScope()
 
+    var isProxyEnabled by remember { mutableStateOf(nodeManager.isProxyEnabled) }
     var proxyHost by remember { mutableStateOf(nodeManager.proxyHost) }
     var proxyPort by remember { mutableStateOf(nodeManager.proxyPort.toString()) }
-    var domesticDirect by remember { mutableStateOf(nodeManager.domesticDirect) }
+    var proxyType by remember { mutableStateOf(nodeManager.proxyType) }
     var defaultTimeRange by remember { mutableStateOf(nodeManager.defaultTimeRange) }
-    var customRssHub by remember { mutableStateOf(nodeManager.customRssHubUrl) }
+    var activeNode by remember { mutableStateOf(nodeManager.activeNode) }
     var accessToken by remember { mutableStateOf(nodeManager.accessToken) }
 
     var isTestingPing by remember { mutableStateOf(false) }
-    var pingResult by remember { mutableStateOf<PingResult?>(null) }
+    var pingResult by remember { mutableStateOf<Pair<Boolean, String>?>(null) }
 
     Dialog(onDismissRequest = onDismiss) {
         Card(
@@ -102,9 +102,14 @@ fun SettingsDesktopDialog(
                                 Icon(Icons.Default.VpnKey, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text("Clash Meta 本地代理集成", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                Spacer(modifier = Modifier.weight(1f))
+                                Switch(
+                                    checked = isProxyEnabled,
+                                    onCheckedChange = { isProxyEnabled = it }
+                                )
                             }
                             Text(
-                                text = "所有请求海外社媒（如 X / Twitter、YouTube、Google 翻译）统一经由本地 Clash Meta 代理转发，彻底解决中断重置与超时问题。",
+                                text = "所有请求海外社媒（如 X / Twitter、YouTube、Google 翻译）统一经由本地 Clash Meta 代理端口转发，彻底解决中断重置与超时问题。",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -118,14 +123,16 @@ fun SettingsDesktopDialog(
                                     onValueChange = { proxyHost = it },
                                     label = { Text("代理主机 Host") },
                                     singleLine = true,
-                                    modifier = Modifier.weight(1.5f)
+                                    modifier = Modifier.weight(1.5f),
+                                    enabled = isProxyEnabled
                                 )
                                 OutlinedTextField(
                                     value = proxyPort,
                                     onValueChange = { proxyPort = it },
                                     label = { Text("代理端口 Port") },
                                     singleLine = true,
-                                    modifier = Modifier.weight(1f)
+                                    modifier = Modifier.weight(1f),
+                                    enabled = isProxyEnabled
                                 )
                             }
 
@@ -133,11 +140,11 @@ fun SettingsDesktopDialog(
                                 verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier.fillMaxWidth()
                             ) {
-                                Checkbox(
-                                    checked = domesticDirect,
-                                    onCheckedChange = { domesticDirect = it }
+                                Text(
+                                    text = if (isProxyEnabled) "已启用代理路由 (默认 127.0.0.1:7890)" else "代理已禁用 (全部直连)",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (isProxyEnabled) Color(0xFF34D399) else MaterialTheme.colorScheme.onSurfaceVariant
                                 )
-                                Text("国内站点直连 (B站 / 萌娘百科 / Steam CN 绕过代理)", style = MaterialTheme.typography.bodySmall)
                                 Spacer(modifier = Modifier.weight(1f))
                                 Button(
                                     onClick = {
@@ -145,15 +152,15 @@ fun SettingsDesktopDialog(
                                         pingResult = null
                                         coroutineScope.launch {
                                             val p = proxyPort.toIntOrNull() ?: 7890
+                                            nodeManager.isProxyEnabled = isProxyEnabled
                                             nodeManager.proxyHost = proxyHost.trim()
                                             nodeManager.proxyPort = p
-                                            nodeManager.domesticDirect = domesticDirect
-                                            val res = nodeManager.testProxyConnection()
+                                            val res = nodeManager.testProxyConnectivity()
                                             isTestingPing = false
                                             pingResult = res
                                         }
                                     },
-                                    enabled = !isTestingPing,
+                                    enabled = !isTestingPing && isProxyEnabled,
                                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
                                     modifier = Modifier.height(34.dp)
                                 ) {
@@ -168,8 +175,8 @@ fun SettingsDesktopDialog(
                             }
 
                             // Ping result feedback
-                            pingResult?.let { res ->
-                                if (res.isSuccess) {
+                            pingResult?.let { (isSuccess, message) ->
+                                if (isSuccess) {
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
@@ -179,7 +186,7 @@ fun SettingsDesktopDialog(
                                     ) {
                                         Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF34D399), modifier = Modifier.size(20.dp))
                                         Spacer(modifier = Modifier.width(8.dp))
-                                        Text("代理连通测试成功！延迟: ${res.latencyMs} ms", style = MaterialTheme.typography.bodySmall, color = Color(0xFF34D399))
+                                        Text(message, style = MaterialTheme.typography.bodySmall, color = Color(0xFF34D399))
                                     }
                                 } else {
                                     Row(
@@ -191,7 +198,7 @@ fun SettingsDesktopDialog(
                                     ) {
                                         Icon(Icons.Default.ErrorOutline, contentDescription = null, tint = Color(0xFFF87171), modifier = Modifier.size(20.dp))
                                         Spacer(modifier = Modifier.width(8.dp))
-                                        Text("连通失败: ${res.errorMessage}", style = MaterialTheme.typography.bodySmall, color = Color(0xFFFCA5A5))
+                                        Text(message, style = MaterialTheme.typography.bodySmall, color = Color(0xFFFCA5A5))
                                     }
                                 }
                             }
@@ -248,9 +255,9 @@ fun SettingsDesktopDialog(
                             }
 
                             OutlinedTextField(
-                                value = customRssHub,
-                                onValueChange = { customRssHub = it },
-                                label = { Text("自建 RSSHub 地址 (例如 https://rsshub.yourdomain.com)") },
+                                value = activeNode,
+                                onValueChange = { activeNode = it },
+                                label = { Text("RSSHub 地址 (默认: https://rsshub.app)") },
                                 singleLine = true,
                                 modifier = Modifier.fillMaxWidth()
                             )
@@ -277,7 +284,7 @@ fun SettingsDesktopDialog(
                             Text("本地存储与日志", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                             val appData = System.getenv("APPDATA") ?: System.getProperty("user.home")
                             Text("本地数据库: $appData\\EntityPulse\\data.db", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text("当前已记录运行日志: ${AppLogger.getRecentLogs().size} 条", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("当前已记录运行日志: ${AppLogger.getAllLogs().size} 条", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 }
@@ -295,11 +302,12 @@ fun SettingsDesktopDialog(
                     }
                     Spacer(modifier = Modifier.width(12.dp))
                     Button(onClick = {
+                        nodeManager.isProxyEnabled = isProxyEnabled
                         nodeManager.proxyHost = proxyHost.trim()
                         nodeManager.proxyPort = proxyPort.toIntOrNull() ?: 7890
-                        nodeManager.domesticDirect = domesticDirect
+                        nodeManager.proxyType = proxyType
                         nodeManager.defaultTimeRange = defaultTimeRange
-                        nodeManager.customRssHubUrl = customRssHub.trim()
+                        nodeManager.activeNode = activeNode.trim()
                         nodeManager.accessToken = accessToken.trim()
                         onSettingsChanged()
                         onDismiss()
