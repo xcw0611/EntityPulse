@@ -6,19 +6,20 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import com.entitypulse.app.data.model.EntityCatalog
 import com.entitypulse.app.data.model.PlatformType
-import com.entitypulse.app.network.OnlineEntityLocator
+import com.entitypulse.app.data.model.PredefinedChannel
 import com.entitypulse.app.network.ParsedFeedItem
 import com.entitypulse.app.network.PlatformResolver
 import com.entitypulse.app.network.ResolvedPlatform
 import kotlinx.coroutines.launch
+import java.net.URLEncoder
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -36,6 +37,9 @@ fun AddChannelDialog(
     var isTesting by remember { mutableStateOf(false) }
     var testResult by remember { mutableStateOf<Result<ParsedFeedItem>?>(null) }
 
+    // 内置浏览器小窗口
+    var showBrowserDialog by remember { mutableStateOf(false) }
+
     // 当输入变动时，实时自动识别
     LaunchedEffect(inputUrlOrHandle) {
         if (inputUrlOrHandle.isNotBlank()) {
@@ -50,21 +54,6 @@ fun AddChannelDialog(
         testResult = null
     }
 
-    var groupedCandidates by remember(entityName) {
-        mutableStateOf(EntityCatalog.generateGroupedCandidates(entityName))
-    }
-
-    LaunchedEffect(entityName) {
-        val online = OnlineEntityLocator.searchOnlineCandidates(entityName)
-        if (online.isNotEmpty()) {
-            groupedCandidates = EntityCatalog.generateGroupedCandidates(entityName, online)
-        }
-    }
-
-    val allCandidateChannels = remember(groupedCandidates) {
-        groupedCandidates.flatMap { it.candidates }
-    }
-
     val presetPlatforms = listOf(
         PlatformType.TWITTER to "https://x.com/",
         PlatformType.YOUTUBE to "https://www.youtube.com/@",
@@ -76,6 +65,23 @@ fun AddChannelDialog(
         PlatformType.RSS_CUSTOM to "https://"
     )
 
+    if (showBrowserDialog) {
+        val q = runCatching { URLEncoder.encode("$entityName 官方社交媒体", "UTF-8") }.getOrDefault(entityName)
+        InAppBrowserDialog(
+            initialUrl = "https://www.bing.com/search?q=$q",
+            entityName = entityName,
+            officialSiteUrl = null,
+            addedChannels = emptyList(),
+            onChannelAdded = { ch ->
+                onConfirm(ch.platformType, ch.identifier, ch.feedPathOrUrl, ch.title)
+                showBrowserDialog = false
+                onDismiss()
+            },
+            onRemoveChannel = {},
+            onDismiss = { showBrowserDialog = false }
+        )
+    }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(text = "为「$entityName」绑定平台账号", style = MaterialTheme.typography.titleLarge) },
@@ -86,35 +92,23 @@ fun AddChannelDialog(
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
+                // 打开内置浏览器检索按钮
+                Button(
+                    onClick = { showBrowserDialog = true },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.Language, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("打开内置小窗口检索并锁定账号")
+                }
+
+                HorizontalDivider()
+
                 Text(
-                    text = "支持直接粘贴该主体在各大平台的个人主页网址、账号 handle 或官方标准 RSS 链接：",
+                    text = "或者直接粘贴该主体在各大平台的个人主页网址、账号 handle 或官方标准 RSS 链接：",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-
-                if (allCandidateChannels.isNotEmpty()) {
-                    Text(
-                        text = "智能匹配与全网联想到的「$entityName」可能账号：",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        allCandidateChannels.forEach { rec ->
-                            SuggestionChip(
-                                onClick = {
-                                    inputUrlOrHandle = rec.feedPathOrUrl
-                                    customTitle = rec.title
-                                },
-                                label = { Text("${rec.platformType.displayName}: ${rec.identifier} (${rec.probabilityNote})") }
-                            )
-                        }
-                    }
-                }
 
                 // 快捷模板选择行
                 Row(
@@ -164,7 +158,7 @@ fun AddChannelDialog(
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
-                                    text = "已智能匹配: ${r.platformType.displayName}",
+                                    text = "已智能识别: ${r.platformType.displayName}",
                                     style = MaterialTheme.typography.labelLarge,
                                     color = MaterialTheme.colorScheme.onSecondaryContainer
                                 )
@@ -224,28 +218,28 @@ fun AddChannelDialog(
                     res.onSuccess { item ->
                         Card(
                             colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.tertiaryContainer
+                                containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.6f)
                             ),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Column(modifier = Modifier.padding(10.dp)) {
                                 Text(
-                                    text = "连接成功！最新动态预览：",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.onTertiaryContainer
+                                    text = "测试通过！最新动态预览：",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary
                                 )
                                 Text(
                                     text = item.title,
                                     style = MaterialTheme.typography.bodySmall,
-                                    maxLines = 2,
-                                    color = MaterialTheme.colorScheme.onTertiaryContainer
+                                    maxLines = 2
                                 )
                             }
                         }
-                    }.onFailure { err ->
+                    }
+                    res.onFailure { err ->
                         Card(
                             colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.errorContainer
+                                containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.6f)
                             ),
                             modifier = Modifier.fillMaxWidth()
                         ) {
@@ -254,13 +248,14 @@ fun AddChannelDialog(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Icon(
-                                    imageVector = Icons.Default.Warning,
+                                    Icons.Default.Warning,
                                     contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.error
+                                    tint = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.size(20.dp)
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = "测试失败: ${err.localizedMessage ?: "连接超时"}",
+                                    text = "连接提示: ${err.message ?: "未知异常"}",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onErrorContainer
                                 )
@@ -274,17 +269,13 @@ fun AddChannelDialog(
             Button(
                 onClick = {
                     val r = resolved ?: return@Button
-                    onConfirm(
-                        r.platformType,
-                        r.identifier,
-                        r.feedPathOrUrl,
-                        customTitle.ifBlank { r.suggestedTitle }
-                    )
+                    val finalTitle = customTitle.ifBlank { r.suggestedTitle }
+                    onConfirm(r.platformType, r.identifier, r.feedPathOrUrl, finalTitle)
                     onDismiss()
                 },
                 enabled = resolved != null
             ) {
-                Text("确认添加")
+                Text("确认绑定")
             }
         },
         dismissButton = {

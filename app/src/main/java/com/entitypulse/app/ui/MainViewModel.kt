@@ -90,11 +90,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         nodeManager.defaultTimeRange = filter
     }
 
-    fun searchOnlineCandidates(query: String, onResult: (List<PredefinedChannel>) -> Unit) {
-        viewModelScope.launch {
-            val candidates = com.entitypulse.app.network.OnlineEntityLocator.searchOnlineCandidates(query)
-            onResult(candidates)
-        }
+    suspend fun searchIpCandidates(query: String): List<com.entitypulse.app.network.IpCandidate> {
+        return com.entitypulse.app.network.OnlineEntityLocator.searchIpCandidates(query, nodeManager.getOkHttpClient())
     }
 
     suspend fun testCandidateChannel(feedUrl: String): Result<ParsedFeedItem> {
@@ -179,9 +176,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    suspend fun locateIpAndSocialChannels(query: String): IpLocateResult {
-        return OnlineEntityLocator.locateIpAndSocialChannels(query, nodeManager.getOkHttpClient())
-    }
 
     suspend fun testCandidateChannel(channel: PredefinedChannel): Result<ParsedFeedItem> {
         return runCatching {
