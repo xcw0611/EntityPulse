@@ -1,6 +1,5 @@
 package com.entitypulse.desktop.ui
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -348,18 +347,16 @@ fun MainDesktopView() {
                         }
 
                         // 回到顶部悬浮按钮
-                        AnimatedVisibility(
-                            visible = showScrollToTop,
-                            modifier = Modifier
-                                .align(Alignment.BottomEnd)
-                                .padding(end = 16.dp, bottom = 16.dp)
-                        ) {
+                        if (showScrollToTop) {
                             FilledTonalButton(
                                 onClick = {
                                     coroutineScope.launch {
                                         feedListState.animateScrollToItem(0)
                                     }
                                 },
+                                modifier = Modifier
+                                    .align(Alignment.BottomEnd)
+                                    .padding(end = 16.dp, bottom = 16.dp),
                                 contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
                                 shape = RoundedCornerShape(20.dp),
                                 colors = ButtonDefaults.filledTonalButtonColors(
