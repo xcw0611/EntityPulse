@@ -4,6 +4,7 @@ import com.entitypulse.app.data.model.EntityCatalog
 import com.entitypulse.app.data.model.PlatformCandidateGroup
 import com.entitypulse.app.data.model.PlatformType
 import com.entitypulse.app.data.model.PredefinedChannel
+import com.entitypulse.app.util.AppLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
