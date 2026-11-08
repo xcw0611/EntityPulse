@@ -20,4 +20,4 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "EntityPulse"
-include(":app")
+include(":desktop")
