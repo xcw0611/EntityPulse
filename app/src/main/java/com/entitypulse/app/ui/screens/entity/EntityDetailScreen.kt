@@ -1,6 +1,7 @@
 package com.entitypulse.app.ui.screens.entity
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -22,6 +23,7 @@ import com.entitypulse.app.data.model.SourceChannelRecord
 import com.entitypulse.app.data.model.TimeRangeFilter
 import com.entitypulse.app.ui.MainViewModel
 import com.entitypulse.app.ui.dialogs.AddChannelDialog
+import com.entitypulse.app.ui.dialogs.EditAvatarDialog
 import com.entitypulse.app.ui.screens.feed.FeedItemCard
 import com.entitypulse.app.ui.screens.feed.PlatformBadge
 import com.entitypulse.app.ui.screens.hub.formatRelativeTime
@@ -55,6 +57,7 @@ fun EntityDetailScreen(
 
     var showAddChannelDialog by remember { mutableStateOf(false) }
     var showDeleteConfirmDialog by remember { mutableStateOf(false) }
+    var showEditAvatarDialog by remember { mutableStateOf(false) }
 
     val entity = entityWithChannels?.entity
 
@@ -125,28 +128,49 @@ fun EntityDetailScreen(
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            if (!entity.avatarUrl.isNullOrBlank()) {
-                                AsyncImage(
-                                    model = entity.avatarUrl,
-                                    contentDescription = entity.name,
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier
-                                        .size(60.dp)
-                                        .clip(CircleShape)
-                                )
-                            } else {
-                                Box(
-                                    contentAlignment = Alignment.Center,
-                                    modifier = Modifier
-                                        .size(60.dp)
-                                        .clip(CircleShape)
-                                        .background(MaterialTheme.colorScheme.primary)
+                            Box(
+                                contentAlignment = Alignment.BottomEnd,
+                                modifier = Modifier
+                                    .size(68.dp)
+                                    .clickable { showEditAvatarDialog = true }
+                            ) {
+                                if (!entity.avatarUrl.isNullOrBlank()) {
+                                    AsyncImage(
+                                        model = entity.avatarUrl,
+                                        contentDescription = entity.name,
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .clip(CircleShape)
+                                    )
+                                } else {
+                                    Box(
+                                        contentAlignment = Alignment.Center,
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .clip(CircleShape)
+                                            .background(MaterialTheme.colorScheme.primary)
+                                    ) {
+                                        Text(
+                                            text = entity.name.take(1).uppercase(),
+                                            color = MaterialTheme.colorScheme.onPrimary,
+                                            fontWeight = FontWeight.Bold,
+                                            style = MaterialTheme.typography.titleLarge
+                                        )
+                                    }
+                                }
+
+                                Surface(
+                                    shape = CircleShape,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    tonalElevation = 4.dp,
+                                    modifier = Modifier.size(24.dp)
                                 ) {
-                                    Text(
-                                        text = entity.name.take(1).uppercase(),
-                                        color = MaterialTheme.colorScheme.onPrimary,
-                                        fontWeight = FontWeight.Bold,
-                                        style = MaterialTheme.typography.titleLarge
+                                    Icon(
+                                        Icons.Default.Edit,
+                                        contentDescription = "修改封面/头像",
+                                        tint = MaterialTheme.colorScheme.onPrimary,
+                                        modifier = Modifier.padding(4.dp)
                                     )
                                 }
                             }
@@ -416,6 +440,20 @@ fun EntityDetailScreen(
                 TextButton(onClick = { showDeleteConfirmDialog = false }) {
                     Text("取消")
                 }
+            }
+        )
+    }
+
+    if (showEditAvatarDialog) {
+        EditAvatarDialog(
+            entityName = entity.name,
+            currentAvatarUrl = entity.avatarUrl,
+            onDismiss = { showEditAvatarDialog = false },
+            onConfirm = { newUrl ->
+                viewModel.updateEntityAvatar(entity.id, newUrl)
+            },
+            onSearchImage = { name ->
+                viewModel.searchCoverImage(name)
             }
         )
     }

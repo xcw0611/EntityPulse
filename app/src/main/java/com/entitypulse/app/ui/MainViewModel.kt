@@ -203,6 +203,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun updateEntityAvatar(id: Long, avatarUrl: String?) {
+        viewModelScope.launch {
+            repository.updateEntityAvatar(id, avatarUrl)
+            _userMessage.emit("主体封面图片已更新")
+        }
+    }
+
+    suspend fun searchCoverImage(query: String): String? {
+        return com.entitypulse.app.network.OnlineEntityLocator.fetchIpCoverImage(query, nodeManager.getOkHttpClient())
+    }
+
     fun toggleEntityNotify(id: Long, currentEnabled: Boolean) {
         viewModelScope.launch {
             repository.toggleNotify(id, !currentEnabled)

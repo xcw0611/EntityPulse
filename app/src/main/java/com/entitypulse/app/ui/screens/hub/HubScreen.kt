@@ -21,9 +21,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import com.entitypulse.app.data.model.EntityRecord
 import com.entitypulse.app.data.model.EntityWithUnreadCount
 import com.entitypulse.app.ui.MainViewModel
 import com.entitypulse.app.ui.dialogs.AddEntityDialog
+import com.entitypulse.app.ui.dialogs.EditAvatarDialog
 import com.entitypulse.app.ui.theme.VipGold
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -38,6 +40,7 @@ fun HubScreen(
     val entities by viewModel.entities.collectAsState()
     val isRefreshing by viewModel.isRefreshing.collectAsState()
     var showAddEntityDialog by remember { mutableStateOf(false) }
+    var editingAvatarEntity by remember { mutableStateOf<EntityRecord?>(null) }
 
     Scaffold(
         topBar = {
@@ -107,7 +110,8 @@ fun HubScreen(
                             item = item,
                             onClick = { onNavigateToEntity(item.entity.id) },
                             onToggleVip = { viewModel.toggleEntityVip(item.entity.id, item.entity.isVip) },
-                            onToggleNotify = { viewModel.toggleEntityNotify(item.entity.id, item.entity.isNotifyEnabled) }
+                            onToggleNotify = { viewModel.toggleEntityNotify(item.entity.id, item.entity.isNotifyEnabled) },
+                            onEditAvatar = { editingAvatarEntity = item.entity }
                         )
                     }
                 }
@@ -124,6 +128,20 @@ fun HubScreen(
             }
         )
     }
+
+    editingAvatarEntity?.let { ent ->
+        EditAvatarDialog(
+            entityName = ent.name,
+            currentAvatarUrl = ent.avatarUrl,
+            onDismiss = { editingAvatarEntity = null },
+            onConfirm = { newUrl ->
+                viewModel.updateEntityAvatar(ent.id, newUrl)
+            },
+            onSearchImage = { name ->
+                viewModel.searchCoverImage(name)
+            }
+        )
+    }
 }
 
 @Composable
@@ -131,7 +149,8 @@ fun EntityCard(
     item: EntityWithUnreadCount,
     onClick: () -> Unit,
     onToggleVip: () -> Unit,
-    onToggleNotify: () -> Unit
+    onToggleNotify: () -> Unit,
+    onEditAvatar: () -> Unit
 ) {
     val entity = item.entity
 
@@ -155,30 +174,35 @@ fun EntityCard(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                // 头像
-                if (!entity.avatarUrl.isNullOrBlank()) {
-                    AsyncImage(
-                        model = entity.avatarUrl,
-                        contentDescription = entity.name,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier
-                            .size(48.dp)
-                            .clip(CircleShape)
-                    )
-                } else {
-                    Box(
-                        contentAlignment = Alignment.Center,
-                        modifier = Modifier
-                            .size(48.dp)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.primary)
-                    ) {
-                        Text(
-                            text = entity.name.take(1).uppercase(),
-                            color = MaterialTheme.colorScheme.onPrimary,
-                            fontWeight = FontWeight.Bold,
-                            style = MaterialTheme.typography.titleMedium
+                // 头像（点击可修改封面/头像）
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier.clickable(onClick = onEditAvatar)
+                ) {
+                    if (!entity.avatarUrl.isNullOrBlank()) {
+                        AsyncImage(
+                            model = entity.avatarUrl,
+                            contentDescription = entity.name,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clip(CircleShape)
                         )
+                    } else {
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.primary)
+                        ) {
+                            Text(
+                                text = entity.name.take(1).uppercase(),
+                                color = MaterialTheme.colorScheme.onPrimary,
+                                fontWeight = FontWeight.Bold,
+                                style = MaterialTheme.typography.titleMedium
+                            )
+                        }
                     }
                 }
 

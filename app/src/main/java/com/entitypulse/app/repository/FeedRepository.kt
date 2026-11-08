@@ -83,6 +83,10 @@ class FeedRepository(
         entityDao.updateNotifyStatus(id, enabled)
     }
 
+    suspend fun updateEntityAvatar(id: Long, avatarUrl: String?) {
+        entityDao.updateAvatar(id, avatarUrl?.trim()?.ifBlank { null })
+    }
+
     // --- Channel Operations ---
     fun observeChannelsForEntity(entityId: Long): Flow<List<SourceChannelRecord>> =
         channelDao.observeByEntityId(entityId)

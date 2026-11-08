@@ -40,6 +40,9 @@ interface EntityDao {
     @Query("UPDATE entities SET isNotifyEnabled = :enabled, updatedAt = :updatedAt WHERE id = :id")
     suspend fun updateNotifyStatus(id: Long, enabled: Boolean, updatedAt: Long = System.currentTimeMillis())
 
+    @Query("UPDATE entities SET avatarUrl = :avatarUrl, updatedAt = :updatedAt WHERE id = :id")
+    suspend fun updateAvatar(id: Long, avatarUrl: String?, updatedAt: Long = System.currentTimeMillis())
+
     @Query("SELECT * FROM entities")
     suspend fun getAll(): List<EntityRecord>
 

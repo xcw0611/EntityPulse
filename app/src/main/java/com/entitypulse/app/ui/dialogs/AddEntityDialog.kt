@@ -466,13 +466,43 @@ fun AddEntityDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                OutlinedTextField(
-                    value = avatarUrl,
-                    onValueChange = { avatarUrl = it },
-                    label = { Text("封面 / 头像图片 URL") },
-                    singleLine = true,
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.fillMaxWidth()
-                )
+                ) {
+                    if (avatarUrl.isNotBlank()) {
+                        AsyncImage(
+                            model = avatarUrl,
+                            contentDescription = "封面预览",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .size(52.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                    }
+                    OutlinedTextField(
+                        value = avatarUrl,
+                        onValueChange = { avatarUrl = it },
+                        label = { Text("封面 / 头像图片 URL") },
+                        singleLine = true,
+                        trailingIcon = {
+                            IconButton(
+                                onClick = {
+                                    if (name.isNotBlank()) {
+                                        coroutineScope.launch {
+                                            val img = viewModel.searchCoverImage(name)
+                                            if (!img.isNullOrBlank()) avatarUrl = img
+                                        }
+                                    }
+                                }
+                            ) {
+                                Icon(Icons.Default.AutoAwesome, contentDescription = "全网搜图", tint = MaterialTheme.colorScheme.primary)
+                            }
+                        },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
 
                 OutlinedTextField(
                     value = category,

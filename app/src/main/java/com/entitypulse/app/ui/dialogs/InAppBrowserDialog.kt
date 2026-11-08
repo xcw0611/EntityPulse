@@ -2,6 +2,10 @@ package com.entitypulse.app.ui.dialogs
 
 import android.annotation.SuppressLint
 import android.graphics.Bitmap
+import android.net.http.SslError
+import android.os.Message
+import android.webkit.CookieManager
+import android.webkit.SslErrorHandler
 import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
@@ -30,6 +34,9 @@ import com.entitypulse.app.network.PlatformResolver
 import com.entitypulse.app.ui.screens.feed.PlatformBadge
 import java.net.URLEncoder
 
+private const val DESKTOP_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+private const val MOBILE_UA = "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
+
 @SuppressLint("SetJavaScriptEnabled")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -51,13 +58,19 @@ fun InAppBrowserDialog(
     var canGoBack by remember { mutableStateOf(false) }
     var canGoForward by remember { mutableStateOf(false) }
 
+    // 默认开启电脑桌面模式，确保 B 站与 X 加载完整功能与登录框
+    var isDesktopMode by remember { mutableStateOf(true) }
+
+    // 登录菜单展开状态
+    var showLoginMenu by remember { mutableStateOf(false) }
+
     // 成功提示横幅状态
     var bannerMessage by remember { mutableStateOf<String?>(null) }
 
     val resolvedPlatform = remember(currentUrl) { PlatformResolver.resolve(currentUrl) }
     val isLockable = remember(currentUrl) { PlatformResolver.isLockableProfile(currentUrl) }
 
-    // 快捷传送门
+    // 快捷传送门（哔哩哔哩默认加载桌面电脑端完整可交互首页 www.bilibili.com）
     val portals = remember(entityName, officialSiteUrl) {
         val list = mutableListOf<Pair<String, String>>()
         if (!officialSiteUrl.isNullOrBlank()) {
@@ -84,7 +97,7 @@ fun InAppBrowserDialog(
         Surface(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 8.dp, vertical = 16.dp),
+                .padding(horizontal = 6.dp, vertical = 12.dp),
             shape = RoundedCornerShape(16.dp),
             color = MaterialTheme.colorScheme.background,
             tonalElevation = 6.dp
@@ -128,6 +141,24 @@ fun InAppBrowserDialog(
                             Icon(Icons.Default.Refresh, contentDescription = "刷新")
                         }
 
+                        // 电脑桌面版 / 移动版一键切换开关（解决 B 站仅有视频与 X 移动端登录空白）
+                        IconButton(
+                            onClick = {
+                                isDesktopMode = !isDesktopMode
+                                webViewInstance?.settings?.apply {
+                                    userAgentString = if (isDesktopMode) DESKTOP_UA else MOBILE_UA
+                                }
+                                webViewInstance?.reload()
+                            },
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (isDesktopMode) Icons.Default.DesktopWindows else Icons.Default.PhoneAndroid,
+                                contentDescription = if (isDesktopMode) "当前为电脑版" else "当前为手机版",
+                                tint = if (isDesktopMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+                            )
+                        }
+
                         Spacer(modifier = Modifier.width(4.dp))
 
                         // 地址与搜索输入框
@@ -164,7 +195,7 @@ fun InAppBrowserDialog(
                         )
                     }
 
-                    // 进度条
+                    // 网页加载进度条
                     if (isLoading && progress < 100) {
                         LinearProgressIndicator(
                             progress = { progress / 100f },
@@ -176,14 +207,79 @@ fun InAppBrowserDialog(
                         )
                     }
 
-                    // 快捷传送门 Chips
+                    // 快捷传送门与统一登录入口 Chips
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .horizontalScroll(rememberScrollState())
                             .padding(top = 6.dp),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
+                        // 统一账号登入入口下拉菜单
+                        Box {
+                            AssistChip(
+                                onClick = { showLoginMenu = true },
+                                label = { Text("🔑 账号登录", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold) },
+                                leadingIcon = { Icon(Icons.Default.Key, contentDescription = null, modifier = Modifier.size(14.dp)) },
+                                colors = AssistChipDefaults.assistChipColors(
+                                    containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f),
+                                    labelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                            )
+
+                            DropdownMenu(
+                                expanded = showLoginMenu,
+                                onDismissRequest = { showLoginMenu = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("𝕏 X (Twitter) 登录页面") },
+                                    onClick = {
+                                        showLoginMenu = false
+                                        val url = "https://x.com/i/flow/login"
+                                        inputUrl = url
+                                        webViewInstance?.loadUrl(url)
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("📺 哔哩哔哩官方登录") },
+                                    onClick = {
+                                        showLoginMenu = false
+                                        val url = "https://passport.bilibili.com/login"
+                                        inputUrl = url
+                                        webViewInstance?.loadUrl(url)
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("▶️ Google / YouTube 登录") },
+                                    onClick = {
+                                        showLoginMenu = false
+                                        val url = "https://accounts.google.com/ServiceLogin?service=youtube"
+                                        inputUrl = url
+                                        webViewInstance?.loadUrl(url)
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("🎮 Steam 商店登录") },
+                                    onClick = {
+                                        showLoginMenu = false
+                                        val url = "https://store.steampowered.com/login/"
+                                        inputUrl = url
+                                        webViewInstance?.loadUrl(url)
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("🔴 Reddit 登录页面") },
+                                    onClick = {
+                                        showLoginMenu = false
+                                        val url = "https://www.reddit.com/login/"
+                                        inputUrl = url
+                                        webViewInstance?.loadUrl(url)
+                                    }
+                                )
+                            }
+                        }
+
                         portals.forEach { (name, url) ->
                             SuggestionChip(
                                 onClick = {
@@ -235,6 +331,11 @@ fun InAppBrowserDialog(
                     AndroidView(
                         factory = { ctx ->
                             WebView(ctx).apply {
+                                // 开启三方 Cookie 保证 X / Bilibili 登录跨域授权不被拦截
+                                val cookieManager = CookieManager.getInstance()
+                                cookieManager.setAcceptCookie(true)
+                                cookieManager.setAcceptThirdPartyCookies(this, true)
+
                                 settings.apply {
                                     javaScriptEnabled = true
                                     domStorageEnabled = true
@@ -244,7 +345,9 @@ fun InAppBrowserDialog(
                                     builtInZoomControls = true
                                     displayZoomControls = false
                                     mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                                    userAgentString = "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
+                                    javaScriptCanOpenWindowsAutomatically = true
+                                    setSupportMultipleWindows(true)
+                                    userAgentString = if (isDesktopMode) DESKTOP_UA else MOBILE_UA
                                 }
 
                                 webViewClient = object : WebViewClient() {
@@ -254,6 +357,11 @@ fun InAppBrowserDialog(
                                             return true
                                         }
                                         return false
+                                    }
+
+                                    override fun onReceivedSslError(view: WebView?, handler: SslErrorHandler?, error: SslError?) {
+                                        // 保证在本地代理工具 (Clash Meta) 代理证书握手时顺利通行
+                                        handler?.proceed()
                                     }
 
                                     override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
@@ -273,6 +381,7 @@ fun InAppBrowserDialog(
                                         pageTitle = view?.title ?: ""
                                         canGoBack = view?.canGoBack() == true
                                         canGoForward = view?.canGoForward() == true
+                                        cookieManager.flush()
                                     }
 
                                     override fun doUpdateVisitedHistory(view: WebView?, url: String?, isReload: Boolean) {
@@ -289,6 +398,19 @@ fun InAppBrowserDialog(
                                     override fun onProgressChanged(view: WebView?, newProgress: Int) {
                                         progress = newProgress
                                         if (newProgress >= 100) isLoading = false
+                                    }
+
+                                    // 支持 X 登录与 OAuth 弹窗转发到当前 WebView 中无缝加载，避免空白卡死
+                                    override fun onCreateWindow(
+                                        view: WebView?,
+                                        isDialog: Boolean,
+                                        isUserGesture: Boolean,
+                                        resultMsg: Message?
+                                    ): Boolean {
+                                        val transport = resultMsg?.obj as? WebView.WebViewTransport
+                                        transport?.webView = view
+                                        resultMsg?.sendToTarget()
+                                        return true
                                     }
                                 }
 
